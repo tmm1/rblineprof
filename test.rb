@@ -14,9 +14,8 @@ per_line = lineprof(__FILE__) do
 end
 
 File.readlines(__FILE__).each_with_index do |line, num|
-  sample = per_line[num+1]
-  if sample
-    printf "% 6d |  %s", per_line[num+1], line
+  if sample = per_line[num+1]
+    printf "% 6d |  %s", sample, line
   else
     printf "       | %s", line
   end
