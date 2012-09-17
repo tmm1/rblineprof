@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include <ruby.h>
 #include <node.h>
@@ -91,8 +92,10 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
       /* grow the per-line array if necessary */
       if (line >= sourcefile->nlines) {
+        long prev_nlines = sourcefile->nlines;
         sourcefile->nlines = line + 100;
         sourcefile->lines = realloc(sourcefile->lines, sizeof(uint64_t) * sourcefile->nlines);
+        memset(sourcefile->lines + prev_nlines, 0, sizeof(uint64_t) * (sourcefile->nlines - prev_nlines));
       }
 
       /* record the sample */
