@@ -65,7 +65,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
   } else { // regex mode
     st_lookup(rblineprof.files, (st_data_t)file, (st_data_t *)&sourcefile);
 
-    if ((long)sourcefile == Qnil) // known negative match, skip
+    if ((VALUE)sourcefile == Qnil) // known negative match, skip
       return;
 
     if (!sourcefile) { // unknown file, check against regex
@@ -107,7 +107,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 static int
 gc_mark_files(st_data_t key, st_data_t record, st_data_t arg)
 {
-  rb_source_filename((char *)record);
+  rb_source_filename((char *)key);
   return ST_CONTINUE;
 }
 
@@ -115,7 +115,7 @@ static int
 cleanup_files(st_data_t key, st_data_t record, st_data_t arg)
 {
   sourcefile_t *sourcefile = (sourcefile_t*)record;
-  if (!sourcefile || (long)sourcefile == Qnil) return;
+  if (!sourcefile || (VALUE)sourcefile == Qnil) return ST_DELETE;
 
   if (sourcefile->lines)
     free(sourcefile->lines);
@@ -128,10 +128,11 @@ static int
 summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 {
   VALUE ret = (VALUE)arg;
-  VALUE ary = rb_ary_new();
   sourcefile_t *sourcefile = (sourcefile_t*)record;
+  if (!sourcefile || (VALUE)sourcefile == Qnil) return ST_CONTINUE;
   long i;
 
+  VALUE ary = rb_ary_new();
   for (i=0; i<sourcefile->nlines; i++)
     rb_ary_store(ary, i, ULL2NUM(sourcefile->lines[i]));
   rb_hash_aset(ret, rb_str_new2(sourcefile->filename), ary);
