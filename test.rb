@@ -1,7 +1,7 @@
 $:.unshift 'ext'
 require 'rblineprof'
 
-per_line = lineprof(__FILE__) do
+profile = lineprof(/./) do
   1000.times do
 
     1*2*3
@@ -14,7 +14,7 @@ per_line = lineprof(__FILE__) do
 end
 
 File.readlines(__FILE__).each_with_index do |line, num|
-  if sample = per_line[num+1]
+  if (sample = profile[__FILE__][num+1]) > 0
     printf "% 6d |  %s", sample, line
   else
     printf "       | %s", line

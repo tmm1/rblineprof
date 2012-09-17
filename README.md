@@ -27,3 +27,8 @@
        |   end
        | end
 ```
+
+## Other profilers
+
+* [PLine](https://github.com/soba1104/PLine) line-profiler for ruby 1.9
+* pure-ruby [LineProfiler](http://blade.nagaokaut.ac.jp/cgi-bin/scat.rb/ruby/ruby-talk/18997?help-en) for ruby 1.6
