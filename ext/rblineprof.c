@@ -30,12 +30,14 @@ static struct {
   // regex mode, store file data in hash table
   VALUE source_regex;
   st_table *files;
+  sourcefile_t *last_file;
 }
 rblineprof = {
   .enabled = false,
   .source_filename = NULL,
   .source_regex = Qfalse,
-  .files = NULL
+  .files = NULL,
+  .last_file = NULL
 };
 
 static uint64_t
@@ -108,6 +110,11 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
     sourcefile->last_time = now;
     sourcefile->last_line = line;
+
+    if (rblineprof.last_file && rblineprof.last_file != sourcefile)
+      rblineprof.last_file->last_time = 0;
+
+    rblineprof.last_file = sourcefile;
   }
 }
 
@@ -165,6 +172,7 @@ lineprof(VALUE self, VALUE filename)
   }
 
   // cleanup
+  rblineprof.last_file = NULL;
   st_foreach(rblineprof.files, cleanup_files, 0);
   if (rblineprof.file.lines) {
     free(rblineprof.file.lines);
