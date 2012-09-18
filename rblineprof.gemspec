@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'rblineprof'
-  s.version = '0.1.0'
+  s.version = '0.2.0'
   s.homepage = 'http://github.com/tmm1/rblineprof'
 
   s.authors = 'Aman Gupta'
