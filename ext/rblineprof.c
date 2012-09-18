@@ -76,7 +76,8 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
     if (!sourcefile) { // unknown file, check against regex
       if (rb_reg_search(rblineprof.source_regex, rb_str_new2(file), 0, 0) >= 0) {
-        sourcefile = calloc(1, sizeof(*sourcefile));
+        sourcefile = ALLOC_N(sourcefile_t, 1);
+        MEMZERO(sourcefile, sourcefile_t, 1);
         sourcefile->filename = strdup(file);
         st_insert(rblineprof.files, (st_data_t)sourcefile->filename, (st_data_t)sourcefile);
       } else { // no match, insert Qnil to prevent regex next time
@@ -91,17 +92,19 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
     if (sourcefile->last_time) {
       /* allocate space for per-line data the first time */
-      if (!sourcefile->lines) {
-        sourcefile->nlines = line + 100;
-        sourcefile->lines = calloc(sourcefile->nlines, sizeof(uint64_t));
+      if (sourcefile->lines == NULL) {
+        sourcefile->nlines = sourcefile->last_line + 100;
+        sourcefile->lines = ALLOC_N(uint64_t, sourcefile->nlines);
+        MEMZERO(sourcefile->lines, uint64_t, sourcefile->nlines);
       }
 
       /* grow the per-line array if necessary */
       if (sourcefile->last_line >= sourcefile->nlines) {
         long prev_nlines = sourcefile->nlines;
         sourcefile->nlines = sourcefile->last_line + 100;
+
         REALLOC_N(sourcefile->lines, uint64_t, sourcefile->nlines);
-        memset(sourcefile->lines + prev_nlines, 0, sizeof(uint64_t) * (sourcefile->nlines - prev_nlines));
+        MEMZERO(sourcefile->lines + prev_nlines, uint64_t, sourcefile->nlines - prev_nlines);
       }
 
       /* record the sample */
@@ -121,14 +124,14 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 static int
 cleanup_files(st_data_t key, st_data_t record, st_data_t arg)
 {
-  free((char *)key);
+  xfree((char *)key);
 
   sourcefile_t *sourcefile = (sourcefile_t*)record;
   if (!sourcefile || (VALUE)sourcefile == Qnil) return ST_DELETE;
 
   if (sourcefile->lines)
-    free(sourcefile->lines);
-  free(sourcefile);
+    xfree(sourcefile->lines);
+  xfree(sourcefile);
 
   return ST_DELETE;
 }
@@ -182,7 +185,7 @@ lineprof(VALUE self, VALUE filename)
   rblineprof.last_file = NULL;
   st_foreach(rblineprof.files, cleanup_files, 0);
   if (rblineprof.file.lines) {
-    free(rblineprof.file.lines);
+    xfree(rblineprof.file.lines);
     rblineprof.file.lines = NULL;
     rblineprof.file.nlines = 0;
   }
