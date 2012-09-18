@@ -72,10 +72,11 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
     if (!sourcefile) { // unknown file, check against regex
       if (rb_reg_search(rblineprof.source_regex, rb_str_new2(file), 0, 0) >= 0) {
         sourcefile = calloc(1, sizeof(*sourcefile));
-        sourcefile->filename = file;
-        st_insert(rblineprof.files, (st_data_t)file, (st_data_t)sourcefile);
+        sourcefile->filename = strdup(file);
+        st_insert(rblineprof.files, (st_data_t)sourcefile->filename, (st_data_t)sourcefile);
       } else { // no match, insert Qnil to prevent regex next time
-        st_insert(rblineprof.files, (st_data_t)file, (st_data_t)Qnil);
+        st_insert(rblineprof.files, (st_data_t)strdup(file), (st_data_t)Qnil);
+        return;
       }
     }
   }
@@ -108,15 +109,10 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 }
 
 static int
-gc_mark_files(st_data_t key, st_data_t record, st_data_t arg)
-{
-  rb_source_filename((char *)key);
-  return ST_CONTINUE;
-}
-
-static int
 cleanup_files(st_data_t key, st_data_t record, st_data_t arg)
 {
+  free((char *)key);
+
   sourcefile_t *sourcefile = (sourcefile_t*)record;
   if (!sourcefile || (VALUE)sourcefile == Qnil) return ST_DELETE;
 
@@ -193,24 +189,9 @@ lineprof(VALUE self, VALUE filename)
   return ret;
 }
 
-static void
-lineprof_mark()
-{
-  if (rblineprof.enabled) {
-    if (rblineprof.source_filename)
-      rb_source_filename(rblineprof.source_filename);
-    else
-      st_foreach(rblineprof.files, gc_mark_files, 0);
-  }
-}
-
 void
 Init_rblineprof()
 {
-  rblineprof.files = st_init_numtable();
-
-  gc_hook = Data_Wrap_Struct(rb_cObject, lineprof_mark, NULL, NULL);
-  rb_global_variable(&gc_hook);
-
+  rblineprof.files = st_init_strtable();
   rb_define_global_function("lineprof", lineprof, 1);
 }
