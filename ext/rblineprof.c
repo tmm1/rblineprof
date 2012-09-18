@@ -151,6 +151,13 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   return ST_CONTINUE;
 }
 
+static VALUE
+lineprof_ensure(VALUE self)
+{
+  rb_remove_event_hook(profiler_hook);
+  rblineprof.enabled = false;
+}
+
 VALUE
 lineprof(VALUE self, VALUE filename)
 {
@@ -182,9 +189,7 @@ lineprof(VALUE self, VALUE filename)
 
   rblineprof.enabled = true;
   rb_add_event_hook(profiler_hook, RUBY_EVENT_LINE);
-  rb_yield(Qnil);
-  rb_remove_event_hook(profiler_hook);
-  rblineprof.enabled = false;
+  rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   VALUE ret = rb_hash_new();
   VALUE ary = Qnil;
