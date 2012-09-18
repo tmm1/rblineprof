@@ -55,6 +55,9 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
   char *file = node->nd_file;
   long line  = nd_line(node);
 
+  if (!file) return;
+  if (line <= 0) return;
+
   if (rblineprof.source_filename) { // single file mode
     if (rblineprof.source_filename == file) {
       sourcefile = &rblineprof.file;
