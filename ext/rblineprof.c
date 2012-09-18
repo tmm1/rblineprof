@@ -100,7 +100,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
       if (sourcefile->last_line >= sourcefile->nlines) {
         long prev_nlines = sourcefile->nlines;
         sourcefile->nlines = sourcefile->last_line + 100;
-        sourcefile->lines = realloc(sourcefile->lines, sizeof(uint64_t) * sourcefile->nlines);
+        REALLOC_N(sourcefile->lines, uint64_t, sourcefile->nlines);
         memset(sourcefile->lines + prev_nlines, 0, sizeof(uint64_t) * (sourcefile->nlines - prev_nlines));
       }
 
