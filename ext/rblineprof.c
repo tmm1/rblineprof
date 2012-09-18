@@ -202,9 +202,19 @@ lineprof(VALUE self, VALUE filename)
   return ret;
 }
 
+static void
+rblineprof_gc_mark()
+{
+  if (rblineprof.enabled)
+    rb_gc_mark_maybe(rblineprof.source_regex);
+}
+
 void
 Init_rblineprof()
 {
+  gc_hook = Data_Wrap_Struct(rb_cObject, rblineprof_gc_mark, NULL, NULL);
+  rb_global_variable(&gc_hook);
+
   rblineprof.files = st_init_strtable();
   rb_define_global_function("lineprof", lineprof, 1);
 }
