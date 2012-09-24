@@ -84,6 +84,8 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
   sourcefile_t *sourcefile = NULL;
 
+  if (!node) return;
+
   char *file = node->nd_file;
   long line  = nd_line(node);
 
