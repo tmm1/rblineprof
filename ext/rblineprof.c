@@ -10,6 +10,7 @@
 #include <re.h>
 
 static VALUE gc_hook;
+#define MAX_METHODS 4096
 
 typedef struct {
   char *filename;
@@ -24,6 +25,10 @@ static struct {
   bool enabled;
   char *last_file;
   long last_line;
+
+  // stack of method calls
+  sourcefile_t *method_calls[MAX_METHODS];
+  uint64_t method_depth;
 
   // single file mode, store filename and line data directly
   char *source_filename;
@@ -83,8 +88,33 @@ static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
   sourcefile_t *sourcefile = NULL;
-
+  uint64_t now = 0;
   if (!node) return;
+
+  switch (event) {
+    case RUBY_EVENT_CALL:
+      rblineprof.method_depth++;
+
+      if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
+        rblineprof.method_calls[rblineprof.method_depth-1] = NULL;
+      break;
+
+    case RUBY_EVENT_RETURN:
+      if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS) {
+        sourcefile = rblineprof.method_calls[rblineprof.method_depth-1];
+        rblineprof.method_calls[rblineprof.method_depth-1] = NULL;
+
+        if (sourcefile) {
+          if (!now) now = timeofday_usec();
+          sourcefile_record(sourcefile, now);
+          sourcefile->last_line = 0;
+          sourcefile = NULL;
+        }
+      }
+
+      rblineprof.method_depth--;
+      break;
+  }
 
   char *file = node->nd_file;
   long line  = nd_line(node);
@@ -126,7 +156,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
   }
 
   if (sourcefile) {
-    uint64_t now = timeofday_usec();
+    if (!now) now = timeofday_usec();
 
     /* increment if the line in the current file changed */
     if (sourcefile->last_line != line) {
@@ -141,6 +171,12 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
     if (rblineprof.last_sourcefile && rblineprof.last_sourcefile != sourcefile) {
       sourcefile_record(rblineprof.last_sourcefile, now);
       rblineprof.last_sourcefile->last_line = 0;
+
+      /* file change on a method call, add to stack */
+      if (event == RUBY_EVENT_CALL) {
+        if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
+          rblineprof.method_calls[rblineprof.method_depth-1] = sourcefile;
+      }
     }
 
     rblineprof.last_sourcefile = sourcefile;
@@ -208,6 +244,7 @@ lineprof(VALUE self, VALUE filename)
   }
 
   // reset state
+  rblineprof.method_depth = 0;
   rblineprof.last_file = NULL;
   rblineprof.last_line = 0;
   rblineprof.last_sourcefile = NULL;
@@ -219,7 +256,7 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_ALL);
+  rb_add_event_hook(profiler_hook, RUBY_EVENT_LINE|RUBY_EVENT_CALL|RUBY_EVENT_RETURN);
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   VALUE ret = rb_hash_new();
