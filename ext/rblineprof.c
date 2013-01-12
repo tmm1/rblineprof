@@ -11,13 +11,16 @@
 
 static VALUE gc_hook;
 #define MAX_METHODS 4096
+typedef uint64_t prof_time_t;
 
+/* Represents a single Ruby file, recording metadata
+  about the file. */
 typedef struct {
   char *filename;
   uint64_t *lines;
   long nlines;
 
-  uint64_t last_time;
+  prof_time_t last_time;
   long last_line;
 } sourcefile_t;
 
@@ -27,7 +30,7 @@ static struct {
   long last_line;
 
   // stack of method calls
-  sourcefile_t *method_calls[MAX_METHODS];
+  sourcefile_t *method_stack[MAX_METHODS];
   uint64_t method_depth;
 
   // single file mode, store filename and line data directly
@@ -39,6 +42,8 @@ static struct {
   st_table *files;
   sourcefile_t *last_sourcefile;
 }
+
+// initialize static
 rblineprof = {
   .enabled = false,
   .last_file = NULL,
@@ -49,17 +54,24 @@ rblineprof = {
   .last_sourcefile = NULL
 };
 
-static uint64_t
+static prof_time_t
 timeofday_usec()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  return (uint64_t)tv.tv_sec*1e6 +
-         (uint64_t)tv.tv_usec;
+  return (prof_time_t)tv.tv_sec*1e6 +
+         (prof_time_t)tv.tv_usec;
 }
 
+/*
+ * Given a sourcefile, place the relevant timing data into the
+ * array times, each index representing a line number.
+ *
+ * Arguments: pointer to sourcefile_t
+ *            the current time, a uint64
+ */
 static inline void
-sourcefile_record(sourcefile_t *sourcefile, uint64_t now)
+sourcefile_record(sourcefile_t *sourcefile, prof_time_t now)
 {
   if (sourcefile->last_time && sourcefile->last_line) {
     /* allocate space for per-line data the first time */
@@ -84,11 +96,22 @@ sourcefile_record(sourcefile_t *sourcefile, uint64_t now)
   }
 }
 
+/*
+ * The actual profiler hook, handling manipulation of our method stack.
+ *
+ * Arguments: event_type -  a Ruby event type constant, represented as an rb_event_t
+ *            node       -  pointer of a Ruby node of type NODE
+ *            self       -  the Ruby self object, as a generic Ruby VALUE
+ *            mid        -  the global Ruby id, as type ID
+ *            klass      -  the Ruby class, as a generic Ruby VALUE
+ */
 static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
   sourcefile_t *sourcefile = NULL;
-  uint64_t now = 0;
+  sourcefile_t *stack_head = NULL;
+
+  prof_time_t now = 0;
   if (!node) return;
 
   switch (event) {
@@ -96,13 +119,24 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
       rblineprof.method_depth++;
 
       if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
-        rblineprof.method_calls[rblineprof.method_depth-1] = NULL;
+        rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
       break;
 
     case RUBY_EVENT_RETURN:
       if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS) {
-        sourcefile = rblineprof.method_calls[rblineprof.method_depth-1];
-        rblineprof.method_calls[rblineprof.method_depth-1] = NULL;
+
+        // the sourcefile
+        sourcefile = rblineprof.method_stack[rblineprof.method_depth-1];
+
+        // move along that stack
+        while (true) {
+                stack_head = rblineprof.method_stack[rblineprof.method_depth--];
+                if (stack_head == sourcefile) {
+                        break;
+                }
+        }
+
+        rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
 
         if (sourcefile) {
           if (!now) now = timeofday_usec();
@@ -175,7 +209,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
       /* file change on a method call, add to stack */
       if (event == RUBY_EVENT_CALL) {
         if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
-          rblineprof.method_calls[rblineprof.method_depth-1] = sourcefile;
+          rblineprof.method_stack[rblineprof.method_depth-1] = sourcefile;
       }
     }
 

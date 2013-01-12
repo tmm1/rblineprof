@@ -9,6 +9,7 @@ profile = lineprof(/./) do
     sleep 0.001
     1*2*3
     4*5*6
+    raise 'whoa'
     7*8*9*10*11*12*13*14*15
     2**32
     2**128
