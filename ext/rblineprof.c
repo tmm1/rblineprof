@@ -63,6 +63,11 @@ timeofday_usec()
          (prof_time_t)tv.tv_usec;
 }
 
+
+// keep track of totals for debugging
+static int calls = 0;
+static int returns = 0;
+
 /*
  * Given a sourcefile, place the relevant timing data into the
  * array times, each index representing a line number.
@@ -96,6 +101,19 @@ sourcefile_record(sourcefile_t *sourcefile, prof_time_t now)
   }
 }
 
+
+
+void call_handler()
+{
+      calls++;
+      rblineprof.method_depth++;
+
+      if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
+        rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
+
+      printf("Line: %2li | Current depth on call: %i\n", rblineprof.last_line, (int) rblineprof.method_depth);
+}
+
 /*
  * The actual profiler hook, handling manipulation of our method stack.
  *
@@ -108,27 +126,30 @@ sourcefile_record(sourcefile_t *sourcefile, prof_time_t now)
 static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
-  sourcefile_t *sourcefile = NULL;
-  sourcefile_t *stack_head = NULL;
-
+  static sourcefile_t *sourcefile = NULL;
+  static sourcefile_t *stack_head = NULL;
   prof_time_t now = 0;
+
   if (!node) return;
 
   switch (event) {
-    case RUBY_EVENT_CALL:
-      rblineprof.method_depth++;
-
-      if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS)
-        rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
+    case RUBY_EVENT_CALL :
+      call_handler();
       break;
 
-    case RUBY_EVENT_RETURN:
+    case RUBY_EVENT_C_CALL :
+      call_handler();
+      break;
+
+    case RUBY_EVENT_RETURN :
+      returns++;
       if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS) {
 
         // the sourcefile
         sourcefile = rblineprof.method_stack[rblineprof.method_depth-1];
 
-        // move along that stack
+        // move along that stack. we can safely clear out anything along the stack
+        // before we hit the sourcefile
         while (true) {
                 stack_head = rblineprof.method_stack[rblineprof.method_depth--];
                 if (stack_head == sourcefile) {
@@ -146,7 +167,36 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
         }
       }
 
-      rblineprof.method_depth--;
+      printf("Line: %2li | Current depth on return: %i\n\n", rblineprof.last_line, (int) rblineprof.method_depth);
+      break;
+
+    case RUBY_EVENT_C_RETURN :
+      returns++;
+      if (rblineprof.method_depth > 0 && rblineprof.method_depth < MAX_METHODS) {
+
+        // the sourcefile
+        sourcefile = rblineprof.method_stack[rblineprof.method_depth-1];
+
+        // move along that stack. we can safely clear out anything along the stack
+        // before we hit the sourcefile
+        while (true) {
+                stack_head = rblineprof.method_stack[rblineprof.method_depth--];
+                if (stack_head == sourcefile) {
+                        break;
+                }
+        }
+
+        rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
+
+        if (sourcefile) {
+          if (!now) now = timeofday_usec();
+          sourcefile_record(sourcefile, now);
+          sourcefile->last_line = 0;
+          sourcefile = NULL;
+        }
+      }
+
+      printf("Line: %2li | Current depth on return: %i\n\n", rblineprof.last_line, (int) rblineprof.method_depth);
       break;
   }
 
@@ -290,7 +340,7 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_LINE|RUBY_EVENT_CALL|RUBY_EVENT_RETURN);
+  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL | RUBY_EVENT_RETURN | RUBY_EVENT_C_CALL | RUBY_EVENT_C_RETURN);
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   VALUE ret = rb_hash_new();
@@ -305,6 +355,9 @@ lineprof(VALUE self, VALUE filename)
   } else {
     st_foreach(rblineprof.files, summarize_files, ret);
   }
+
+  printf("Total calls: %i\n", calls);
+  printf("Total returns: %i\n", returns);
 
   return ret;
 }
