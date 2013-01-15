@@ -1,6 +1,14 @@
 $:.unshift 'ext'
 require 'rblineprof'
 
+
+class Derp
+  def self.woot
+   sleep 2
+   puts 'foo'
+  end
+end
+
 def inner
   sleep 0.2 # this gets called a total of 3 times
   puts 'inner'
@@ -19,6 +27,8 @@ profile = lineprof(/./) do
   outer
   inner
   outer
+
+  Derp.woot
 end
 
 File.readlines(__FILE__).each_with_index do |line, num|
