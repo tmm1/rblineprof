@@ -231,16 +231,16 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
 	switch (event) {
 		case RUBY_EVENT_CALL :
-			call_handler(node, sourcefile, stack_head, now);
+		        call_handler(node, sourcefile, stack_head, now);
 			break;
 
 		case RUBY_EVENT_C_CALL :
 			call_handler(node, sourcefile, stack_head, now);
-			break;
+                        break;
 
 		case RUBY_EVENT_RETURN :
                         return_handler(sourcefile, stack_head, now);
-			break;
+                        break;
 
 		case RUBY_EVENT_C_RETURN :
                         return_handler(sourcefile, stack_head, now);
