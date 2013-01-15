@@ -130,7 +130,7 @@ void return_handler(sourcefile_t *sourcefile, sourcefile_t *stack_head, prof_tim
                 }
         }
 
-        printf("Line: %2li | Current depth n return: %i\n\n", rblineprof.last_line, (int) rblineprof.method_depth);
+        printf("Line: %2li | Current depth on return: %i\n\n", rblineprof.last_line, (int) rblineprof.method_depth);
 
 }
 
@@ -223,8 +223,8 @@ void call_handler(NODE *node, sourcefile_t *sourcefile, sourcefile_t *stack_head
 static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
-	static sourcefile_t *sourcefile = NULL;
-	static sourcefile_t *stack_head = NULL;
+	sourcefile_t *sourcefile = NULL;
+	sourcefile_t *stack_head = NULL;
 	prof_time_t now = 0;
 
 	if (!node) return;
