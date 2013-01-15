@@ -35,3 +35,6 @@
 
 * [PLine](https://github.com/soba1104/PLine) line-profiler for ruby 1.9
 * pure-ruby [LineProfiler](http://blade.nagaokaut.ac.jp/cgi-bin/scat.rb/ruby/ruby-talk/18997?help-en) for ruby 1.6
+* [method_profiler](https://github.com/change/method_profiler)
+* [ruby-prof](https://github.com/rdp/ruby-prof)
+* [perftools.rb](https://github.com/tmm1/perftools.rb)
