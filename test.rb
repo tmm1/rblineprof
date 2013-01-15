@@ -2,10 +2,12 @@ $:.unshift 'ext'
 require 'rblineprof'
 
 def inner
+  sleep 0.2 # this gets called a total of 3 times
   puts 'inner'
 end
 
 def outer
+  sleep 0.1 # this gets called a total of 2 times
   inner
 end
 

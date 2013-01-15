@@ -151,6 +151,7 @@ void call_handler(NODE *node, sourcefile_t *sourcefile, sourcefile_t *stack_head
 	// skip duplicate events fast
 	if (file == rblineprof.last_file && line == rblineprof.last_line)
 		return;
+
 	rblineprof.last_file = file;
 	rblineprof.last_line = line;
 
@@ -213,11 +214,11 @@ void call_handler(NODE *node, sourcefile_t *sourcefile, sourcefile_t *stack_head
 /*
  * The actual profiler hook, handling manipulation of our method stack.
  *
- * Arguments: event_type -	a Ruby event type constant, represented as an rb_event_t
- *						node			 -	pointer of a Ruby node of type NODE
- *						self			 -	the Ruby self object, as a generic Ruby VALUE
- *						mid				-	the global Ruby id, as type ID
- *						klass			-	the Ruby class, as a generic Ruby VALUE
+ * Arguments:   event_type - a Ruby event type constant, represented as an rb_event_t
+ *	        node   -     pointer of a Ruby node of type NODE
+ *		self   -     the Ruby self object, as a generic Ruby VALUE
+ *		mid    -     the global Ruby id, as type ID
+ *		klass  -     the Ruby class, as a generic Ruby VALUE
  */
 static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
