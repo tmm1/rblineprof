@@ -4,6 +4,7 @@ require 'rblineprof'
 def inner
   sleep 0.2 # this gets called a total of 3 times
   puts 'inner'
+  4*5*6*20; sleep 0.3
 end
 
 def outer
