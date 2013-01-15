@@ -9,14 +9,16 @@
 #include <st.h>
 #include <re.h>
 
+typedef uint64_t prof_time_t;
+
 static VALUE gc_hook;
 
 typedef struct {
   char *filename;
-  uint64_t *lines;
+  prof_time_t *lines;
   long nlines;
 
-  uint64_t last_time;
+  prof_time_t last_time;
   long last_line;
 } sourcefile_t;
 
@@ -44,24 +46,24 @@ rblineprof = {
   .last_sourcefile = NULL
 };
 
-static uint64_t
+static prof_time_t
 timeofday_usec()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  return (uint64_t)tv.tv_sec*1e6 +
-         (uint64_t)tv.tv_usec;
+  return (prof_time_t)tv.tv_sec*1e6 +
+         (prof_time_t)tv.tv_usec;
 }
 
 static inline void
-sourcefile_record(sourcefile_t *sourcefile, uint64_t now)
+sourcefile_record(sourcefile_t *sourcefile, prof_time_t now)
 {
   if (sourcefile->last_time && sourcefile->last_line) {
     /* allocate space for per-line data the first time */
     if (sourcefile->lines == NULL) {
       sourcefile->nlines = sourcefile->last_line + 100;
-      sourcefile->lines = ALLOC_N(uint64_t, sourcefile->nlines);
-      MEMZERO(sourcefile->lines, uint64_t, sourcefile->nlines);
+      sourcefile->lines = ALLOC_N(prof_time_t, sourcefile->nlines);
+      MEMZERO(sourcefile->lines, prof_time_t, sourcefile->nlines);
     }
 
     /* grow the per-line array if necessary */
@@ -69,8 +71,8 @@ sourcefile_record(sourcefile_t *sourcefile, uint64_t now)
       long prev_nlines = sourcefile->nlines;
       sourcefile->nlines = sourcefile->last_line + 100;
 
-      REALLOC_N(sourcefile->lines, uint64_t, sourcefile->nlines);
-      MEMZERO(sourcefile->lines + prev_nlines, uint64_t, sourcefile->nlines - prev_nlines);
+      REALLOC_N(sourcefile->lines, prof_time_t, sourcefile->nlines);
+      MEMZERO(sourcefile->lines + prev_nlines, prof_time_t, sourcefile->nlines - prev_nlines);
     }
 
     /* record the sample */
@@ -126,7 +128,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
   }
 
   if (sourcefile) {
-    uint64_t now = timeofday_usec();
+    prof_time_t now = timeofday_usec();
 
     /* increment if the line in the current file changed */
     if (sourcefile->last_line != line) {
