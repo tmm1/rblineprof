@@ -115,9 +115,8 @@ void return_handler(sourcefile_t *sourcefile, sourcefile_t *stack_head, prof_tim
                 // before we hit the sourcefile
                 do {
                         stack_head = rblineprof.method_stack[rblineprof.method_depth--];
-                        if (stack_head == sourcefile) {
+                        if (stack_head == sourcefile)
                                 break;
-                        }
                 } while (1);
 
                 rblineprof.method_stack[rblineprof.method_depth-1] = NULL;
@@ -230,7 +229,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 	if (!node) return;
 
 	switch (event) {
-                case RUBY_EVENT_CALL :
+        	case RUBY_EVENT_CALL :
 			call_handler(node, sourcefile, stack_head, now);
 			break;
 
