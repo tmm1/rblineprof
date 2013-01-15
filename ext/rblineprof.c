@@ -230,8 +230,8 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 	if (!node) return;
 
 	switch (event) {
-		case RUBY_EVENT_CALL :
-		        call_handler(node, sourcefile, stack_head, now);
+                case RUBY_EVENT_CALL :
+			call_handler(node, sourcefile, stack_head, now);
 			break;
 
 		case RUBY_EVENT_C_CALL :
