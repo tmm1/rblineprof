@@ -245,9 +245,9 @@ lineprof_ensure(VALUE self)
 }
 
 static VALUE
-lineprof_rescue(VALUE args)
+lineprof_rescue(VALUE args, VALUE exception_object)
 {
-  rb_raise(rb_eRuntimeError, "Exception raised in profiled Ruby code");
+  rb_raise(rb_eRuntimeError, "Uncaught exception (%s) in profiled code.", rb_obj_classname(exception_object));
   return Qnil;
 }
 
