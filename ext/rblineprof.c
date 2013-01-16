@@ -144,18 +144,24 @@ sourcefile_lookup(char *filename)
 static void
 profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 {
-  if (!node || !ruby_current_node) return;
+  char *file;
+  long line;
+  stackframe_t *frame = NULL;
+  sourcefile_t *srcfile, *curr_srcfile;
+  prof_time_t now = timeofday_usec();
 
-  char *file = ruby_current_node->nd_file;
-  long line  = nd_line(ruby_current_node);
+  /* file profiler: when invoking a method in a new file, account elapsed
+   * time to the current file and start a new timer.
+   */
+  if (!node) return;
 
+  file = node->nd_file;
+  line = nd_line(node);
   if (!file) return;
   if (line <= 0) return;
 
-  stackframe_t *frame = NULL;
-  prof_time_t now = timeofday_usec();
-  sourcefile_t *srcfile = sourcefile_lookup(file);
-  sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
+  srcfile = sourcefile_lookup(file);
+  curr_srcfile = rblineprof.curr_srcfile;
 
   if (curr_srcfile != srcfile) {
     if (curr_srcfile)
@@ -167,7 +173,22 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
     rblineprof.curr_srcfile = srcfile;
   }
 
-  if (!srcfile) return; /* skip line profiling */
+  /* line profiler: maintain a stack of CALL events with timestamps. for
+   * each corresponding RETURN, account elapsed time to the calling line.
+   *
+   * we use ruby_current_node here to get the caller's file/line info,
+   * (as opposed to node, which points to the callee method being invoked)
+   */
+  if (!ruby_current_node) return;
+
+  file = ruby_current_node->nd_file;
+  line = nd_line(ruby_current_node);
+  if (!file) return;
+  if (line <= 0) return;
+
+  if (ruby_current_node->nd_file != node->nd_file)
+    srcfile = sourcefile_lookup(file);
+  if (!srcfile) return; /* skip line profiling for this file */
 
   switch (event) {
     case RUBY_EVENT_CALL:
