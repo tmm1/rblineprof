@@ -13,12 +13,19 @@ typedef uint64_t prof_time_t;
 
 static VALUE gc_hook;
 
+/*
+ * Struct representing an individual line of
+ * Ruby source code
+ */
 typedef struct sourceline {
-  uint64_t calls;
+  uint64_t calls; // total number of calls
   prof_time_t total_time;
   prof_time_t max_time;
 } sourceline_t;
 
+/*
+ * Struct representing a single Ruby file.
+ */
 typedef struct sourcefile {
   char *filename;
   long nlines;
@@ -28,7 +35,12 @@ typedef struct sourcefile {
   prof_time_t total_time;
 } sourcefile_t;
 
+/*
+ * An individual stack frame used to track
+ * calls and returns from Ruby methods
+ */
 typedef struct stackframe {
+  // data emitted from Ruby to our profiler hook
   rb_event_t event;
   NODE *node;
   VALUE self;
@@ -42,6 +54,9 @@ typedef struct stackframe {
   sourcefile_t *srcfile;
 } stackframe_t;
 
+/*
+ * Static properties and rbineprof configuration
+ */
 static struct {
   bool enabled;
 
