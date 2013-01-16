@@ -244,6 +244,13 @@ lineprof_ensure(VALUE self)
   rblineprof.enabled = false;
 }
 
+static VALUE
+lineprof_rescue(VALUE args)
+{
+  rb_raise(rb_eRuntimeError, "Exception raised in profiled Ruby code");
+  return Qnil;
+}
+
 VALUE
 lineprof(VALUE self, VALUE filename)
 {
@@ -298,6 +305,12 @@ lineprof(VALUE self, VALUE filename)
   return ret;
 }
 
+VALUE
+lineprof_wrapper(VALUE self, VALUE filename)
+{
+  rb_rescue(lineprof, filename, lineprof_rescue, Qnil);
+}
+
 static void
 rblineprof_gc_mark()
 {
@@ -312,7 +325,7 @@ Init_rblineprof()
   rb_global_variable(&gc_hook);
 
   rblineprof.files = st_init_strtable();
-  rb_define_global_function("lineprof", lineprof, 1);
+  rb_define_global_function("lineprof", lineprof_wrapper, 1);
 }
 
 /* vim: ts=2,sw=2,expandtab */
