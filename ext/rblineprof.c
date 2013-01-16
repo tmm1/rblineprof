@@ -85,7 +85,7 @@ stackframe_record(stackframe_t *frame, prof_time_t now)
   if (srcfile->lines == NULL) {
     srcfile->nlines = line + 100;
     srcfile->lines = ALLOC_N(sourceline_t, srcfile->nlines);
-    MEMZERO(srcfile->lines, prof_time_t, srcfile->nlines);
+    MEMZERO(srcfile->lines, sourceline_t, srcfile->nlines);
   }
 
   /* grow the per-line array if necessary */
@@ -94,7 +94,7 @@ stackframe_record(stackframe_t *frame, prof_time_t now)
     srcfile->nlines = line + 100;
 
     REALLOC_N(srcfile->lines, sourceline_t, srcfile->nlines);
-    MEMZERO(srcfile->lines + prev_nlines, prof_time_t, srcfile->nlines - prev_nlines);
+    MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
   }
 
   /* record the sample */
