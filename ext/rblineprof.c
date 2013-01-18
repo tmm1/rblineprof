@@ -6,7 +6,6 @@
 #include <ruby.h>
 
 #ifndef RUBY_VM
-#include <ruby/node.h>
 #include <node.h>
 
 #include <node.h>
