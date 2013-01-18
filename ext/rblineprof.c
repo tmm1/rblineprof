@@ -217,7 +217,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    */
 
 #ifndef RUBY_18
-  VALUE *caller_node = ruby_frame->node;
+  VALUE *caller_node; // ruby_frame on 1.9?
 #else
   NODE *caller_node = ruby_frame->node;
 #endif
@@ -235,7 +235,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   if (line <= 0) return;
 
 #ifndef RUBY_18
-  if (caller_node != "fixme")
+  if (caller_node != node)
 #else
   if (caller_node->nd_file != node->nd_file)
 #endif
