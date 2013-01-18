@@ -50,10 +50,10 @@ typedef struct sourcefile {
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
   rb_event_flag_t event;
-#ifndef RUBY_18
-  VALUE *node;
-#else
+#ifndef RUBY_VM
   NODE *node;
+#else
+  VALUE *node;
 #endif
   VALUE self;
   ID mid;
@@ -169,10 +169,10 @@ sourcefile_lookup(char *filename)
 }
 
 static void
-#ifndef RUBY_18
-profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
-#else
+#ifndef RUBY_VM
 profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#else
+profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
 #endif
 {
   char *file;
@@ -186,10 +186,10 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    */
   if (!node) return;
 
-#ifndef RUBY_18
-  file = "wat";
-#else
+#ifndef RUBY_VM
   file = node->nd_file;
+#else
+  file = "wat";
 #endif
 
   line = nd_line(node);
@@ -216,28 +216,28 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    * (as opposed to node, which points to the callee method being invoked)
    */
 
-#ifndef RUBY_18
-  VALUE *caller_node; // ruby_frame on 1.9?
-#else
+#ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
+#else
+  VALUE *caller_node; // ruby_frame on 1.9?
 #endif
 
   if (!caller_node) return;
 
-#ifndef RUBY_18
-  file = "fixme";
-#else
+#ifndef RUBY_VM
   file = caller_node->nd_file;
+#else
+  file = "fixme";
 #endif
 
   line = nd_line(caller_node);
   if (!file) return;
   if (line <= 0) return;
 
-#ifndef RUBY_18
-  if (caller_node != node)
-#else
+#ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
+#else
+  if (caller_node != node)
 #endif
 
     srcfile = sourcefile_lookup(file);
@@ -348,11 +348,10 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-#ifndef RUBY_18
+#ifndef RUBY_VM
   rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
 #else
   rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
-
 #endif
 
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
