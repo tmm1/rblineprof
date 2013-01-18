@@ -190,7 +190,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #ifndef RUBY_18
   file = "wat";
 #else
-  file = node->nd_reserved;
+  file = node->nd_file;
 #endif
 
   line = nd_line(node);
