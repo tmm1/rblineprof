@@ -314,7 +314,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 static VALUE
 lineprof_ensure(VALUE self)
 {
-  rb_remove_event_hook(profiler_hook);
+  rb_remove_event_hook((rb_event_hook_func_t) profiler_hook);
   rblineprof.enabled = false;
 }
 
@@ -349,9 +349,9 @@ lineprof(VALUE self, VALUE filename)
 
   rblineprof.enabled = true;
 #ifndef RUBY_18
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
 #else
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
 
 #endif
 
