@@ -31,8 +31,8 @@ typedef struct sourcefile {
   long nlines;
   sourceline_t *lines;
 
-  prof_time_t start;
-  prof_time_t total_time;
+  prof_time_t exclusive_start;
+  prof_time_t exclusive_time;
 } sourcefile_t;
 
 /*
@@ -180,10 +180,10 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
   if (curr_srcfile != srcfile) {
     if (curr_srcfile)
-      curr_srcfile->total_time += now - curr_srcfile->start;
+      curr_srcfile->exclusive_time += now - curr_srcfile->exclusive_start;
 
     if (srcfile)
-      srcfile->start = now;
+      srcfile->exclusive_start = now;
 
     rblineprof.curr_srcfile = srcfile;
   }
@@ -264,7 +264,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   VALUE ary = rb_ary_new();
   long i;
 
-  rb_ary_store(ary, 0, ULL2NUM(srcfile->total_time));
+  rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
   for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, ULL2NUM(srcfile->lines[i].total_time));
 
@@ -315,7 +315,7 @@ lineprof(VALUE self, VALUE filename)
 
   sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
   if (curr_srcfile)
-    curr_srcfile->total_time += timeofday_usec() - curr_srcfile->start;
+    curr_srcfile->exclusive_time += timeofday_usec() - curr_srcfile->exclusive_start;
 
   VALUE ret = rb_hash_new();
   VALUE ary = Qnil;
@@ -323,7 +323,7 @@ lineprof(VALUE self, VALUE filename)
   if (rblineprof.source_filename) {
     long i;
     ary = rb_ary_new();
-    rb_ary_store(ary, 0, ULL2NUM(rblineprof.file.total_time));
+    rb_ary_store(ary, 0, ULL2NUM(rblineprof.file.exclusive_time));
     for (i=1; i<rblineprof.file.nlines; i++)
       rb_ary_store(ary, i, ULL2NUM(rblineprof.file.lines[i].total_time));
     rb_hash_aset(ret, rb_str_new2(rblineprof.source_filename), ary);
