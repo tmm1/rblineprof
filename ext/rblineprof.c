@@ -51,10 +51,10 @@ typedef struct sourcefile {
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
   rb_event_flag_t event;
-#ifdef RUBY_18
-  NODE *node;
-#else
+#ifndef RUBY_18
   VALUE *node;
+#else
+  NODE *node;
 #endif
   VALUE self;
   ID mid;
@@ -235,10 +235,10 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   if (!file) return;
   if (line <= 0) return;
 
-#ifdef RUBY_18
-  if (caller_node->nd_file != node->nd_file)
-#else
+#ifndef RUBY_18
   if (caller_node != "fixme")
+#else
+  if (caller_node->nd_file != node->nd_file)
 #endif
 
     srcfile = sourcefile_lookup(file);
