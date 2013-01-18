@@ -25,9 +25,10 @@ profile = lineprof(/./) do
 end
 
 File.readlines(__FILE__).each_with_index do |line, num|
-  if (sample = profile[__FILE__][num+1]) > 0
-    printf "% 8.1fms |  %s", sample/1000.0, line
+  time, calls = profile[__FILE__][num+1]
+  if calls && calls > 0
+    printf "% 8.1fms (% 5d) |  %s", time/1000.0, calls, line
   else
-    printf "           | %s", line
+    printf "                   | %s", line
   end
 end

@@ -266,7 +266,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 
   rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
   for (i=1; i<srcfile->nlines; i++)
-    rb_ary_store(ary, i, ULL2NUM(srcfile->lines[i].total_time));
+    rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
 
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
@@ -321,12 +321,7 @@ lineprof(VALUE self, VALUE filename)
   VALUE ary = Qnil;
 
   if (rblineprof.source_filename) {
-    long i;
-    ary = rb_ary_new();
-    rb_ary_store(ary, 0, ULL2NUM(rblineprof.file.exclusive_time));
-    for (i=1; i<rblineprof.file.nlines; i++)
-      rb_ary_store(ary, i, ULL2NUM(rblineprof.file.lines[i].total_time));
-    rb_hash_aset(ret, rb_str_new2(rblineprof.source_filename), ary);
+    summarize_files(Qnil, (st_data_t)&rblineprof.file, ret);
   } else {
     st_foreach(rblineprof.files, summarize_files, ret);
   }
