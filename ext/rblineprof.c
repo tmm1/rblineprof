@@ -4,11 +4,18 @@
 #include <string.h>
 
 #include <ruby.h>
+
+#ifndef RUBY_VM
+#include <node.h>
+
 #include <node.h>
 #include <env.h>
 #include <intern.h>
 #include <st.h>
 #include <re.h>
+
+typedef rb_event_t rb_event_flag_t;
+#endif
 
 typedef uint64_t prof_time_t;
 
@@ -42,8 +49,12 @@ typedef struct sourcefile {
  */
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
-  rb_event_t event;
+  rb_event_flag_t event;
+#ifndef RUBY_VM
   NODE *node;
+#else
+  VALUE *node;
+#endif
   VALUE self;
   ID mid;
   VALUE klass;
@@ -158,7 +169,11 @@ sourcefile_lookup(char *filename)
 }
 
 static void
-profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#ifndef RUBY_VM
+profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#else
+profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
+#endif
 {
   char *file;
   long line;
@@ -171,7 +186,12 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
    */
   if (!node) return;
 
+#ifndef RUBY_VM
   file = node->nd_file;
+#else
+  file = "wat";
+#endif
+
   line = nd_line(node);
   if (!file) return;
   if (line <= 0) return;
@@ -195,15 +215,31 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
    * we use ruby_current_node here to get the caller's file/line info,
    * (as opposed to node, which points to the callee method being invoked)
    */
+
+#ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
+#else
+  VALUE *caller_node; // ruby_frame on 1.9?
+#endif
+
   if (!caller_node) return;
 
+#ifndef RUBY_VM
   file = caller_node->nd_file;
+#else
+  file = "fixme";
+#endif
+
   line = nd_line(caller_node);
   if (!file) return;
   if (line <= 0) return;
 
+#ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
+#else
+  if (caller_node != node)
+#endif
+
     srcfile = sourcefile_lookup(file);
   if (!srcfile) return; /* skip line profiling for this file */
 
@@ -278,7 +314,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 static VALUE
 lineprof_ensure(VALUE self)
 {
-  rb_remove_event_hook(profiler_hook);
+  rb_remove_event_hook((rb_event_hook_func_t) profiler_hook);
   rblineprof.enabled = false;
 }
 
@@ -312,7 +348,12 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#ifndef RUBY_VM
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#else
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
+#endif
+
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
