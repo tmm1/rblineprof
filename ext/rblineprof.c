@@ -15,10 +15,6 @@
 #include <st.h>
 #include <re.h>
 
-#define rb_full_sourcefile() (node ? node->nd_file : 0)
-#define rb_caller_sourcefile() (node ? caller_node->nd_file : 0)
-#define rb_full_sourceline() (node ? nd_line(node) : 0)
-
 typedef rb_event_t rb_event_flag_t;
 #endif
 
@@ -191,7 +187,12 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    */
   if (!node) return;
 
-  file = rb_full_sourcefile();
+#ifndef RUBY_18
+  file = "wat";
+#else
+  file = node->nd_reserved;
+#endif
+
   line = nd_line(node);
   if (!file) return;
   if (line <= 0) return;
@@ -224,12 +225,22 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 
   if (!caller_node) return;
 
-  file = rb_caller_sourcefile();
+#ifndef RUBY_18
+  file = "fixme";
+#else
+  file = caller_node->nd_file;
+#endif
+
   line = nd_line(caller_node);
   if (!file) return;
   if (line <= 0) return;
 
-  if (rb_caller_sourcefile() != rb_full_sourcefile())
+#ifdef RUBY_18
+  if (caller_node->nd_file != node->nd_file)
+#else
+  if (caller_node != "fixme")
+#endif
+
     srcfile = sourcefile_lookup(file);
   if (!srcfile) return; /* skip line profiling for this file */
 
