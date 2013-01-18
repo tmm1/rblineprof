@@ -349,10 +349,11 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-#ifdef RUBY_VM
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
-#else
+#ifndef RUBY_18
   rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#else
+  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
+
 #endif
 
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
