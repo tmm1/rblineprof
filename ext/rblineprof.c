@@ -5,6 +5,7 @@
 
 #include <ruby.h>
 #include <node.h>
+#include <env.h>
 #include <intern.h>
 #include <st.h>
 #include <re.h>
@@ -194,14 +195,15 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
    * we use ruby_current_node here to get the caller's file/line info,
    * (as opposed to node, which points to the callee method being invoked)
    */
-  if (!ruby_current_node) return;
+  NODE *caller_node = ruby_frame->node;
+  if (!caller_node) return;
 
-  file = ruby_current_node->nd_file;
-  line = nd_line(ruby_current_node);
+  file = caller_node->nd_file;
+  line = nd_line(caller_node);
   if (!file) return;
   if (line <= 0) return;
 
-  if (ruby_current_node->nd_file != node->nd_file)
+  if (caller_node->nd_file != node->nd_file)
     srcfile = sourcefile_lookup(file);
   if (!srcfile) return; /* skip line profiling for this file */
 
@@ -230,7 +232,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
         else
           frame = NULL;
         rblineprof.stack_depth--;
-      } while (frame && frame->node != node && frame->self != self && frame->mid != mid && frame->klass != klass);
+      } while (frame && frame->self != self && frame->mid != mid && frame->klass != klass);
 
       if (frame)
         stackframe_record(frame, now);
