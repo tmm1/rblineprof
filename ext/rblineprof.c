@@ -4,26 +4,86 @@
 #include <string.h>
 
 #include <ruby.h>
+
+#ifndef RUBY_VM
+#include <ruby/node.h>
 #include <node.h>
+
+#include <node.h>
+#include <env.h>
 #include <intern.h>
 #include <st.h>
 #include <re.h>
 
+#define rb_full_sourcefile() (node ? node->nd_file : 0)
+#define rb_caller_sourcefile() (node ? caller_node->nd_file : 0)
+#define rb_full_sourceline() (node ? nd_line(node) : 0)
+
+typedef rb_event_t rb_event_flag_t;
+#endif
+
+typedef uint64_t prof_time_t;
+
 static VALUE gc_hook;
 
-typedef struct {
-  char *filename;
-  uint64_t *lines;
-  long nlines;
+/*
+ * Struct representing an individual line of
+ * Ruby source code
+ */
+typedef struct sourceline {
+  uint64_t calls; // total number of calls
+  prof_time_t total_time;
+  prof_time_t max_time;
+} sourceline_t;
 
-  uint64_t last_time;
-  long last_line;
+/*
+ * Struct representing a single Ruby file.
+ */
+typedef struct sourcefile {
+  char *filename;
+  long nlines;
+  sourceline_t *lines;
+
+  prof_time_t exclusive_start;
+  prof_time_t exclusive_time;
 } sourcefile_t;
 
+/*
+ * An individual stack frame used to track
+ * calls and returns from Ruby methods
+ */
+typedef struct stackframe {
+  // data emitted from Ruby to our profiler hook
+  rb_event_flag_t event;
+#ifdef RUBY_18
+  NODE *node;
+#else
+  VALUE *node;
+#endif
+  VALUE self;
+  ID mid;
+  VALUE klass;
+
+  char *filename;
+  long line;
+
+  prof_time_t start;
+  sourcefile_t *srcfile;
+} stackframe_t;
+
+/*
+ * Static properties and rbineprof configuration
+ */
 static struct {
   bool enabled;
-  char *last_file;
-  long last_line;
+
+  // stack
+  #define MAX_STACK_DEPTH 32768
+  stackframe_t stack[MAX_STACK_DEPTH];
+  uint64_t stack_depth;
+
+  // current file
+  sourcefile_t *curr_srcfile;
 
   // single file mode, store filename and line data directly
   char *source_filename;
@@ -32,118 +92,178 @@ static struct {
   // regex mode, store file data in hash table
   VALUE source_regex;
   st_table *files;
-  sourcefile_t *last_sourcefile;
 }
 rblineprof = {
   .enabled = false,
-  .last_file = NULL,
-  .last_line = 0,
-  .source_filename = NULL,
-  .source_regex = Qfalse,
-  .files = NULL,
-  .last_sourcefile = NULL
+  .source_regex = Qfalse
 };
 
-static uint64_t
+static prof_time_t
 timeofday_usec()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  return (uint64_t)tv.tv_sec*1e6 +
-         (uint64_t)tv.tv_usec;
+  return (prof_time_t)tv.tv_sec*1e6 +
+         (prof_time_t)tv.tv_usec;
 }
 
 static inline void
-sourcefile_record(sourcefile_t *sourcefile, uint64_t now)
+stackframe_record(stackframe_t *frame, prof_time_t now)
 {
-  if (sourcefile->last_time && sourcefile->last_line) {
-    /* allocate space for per-line data the first time */
-    if (sourcefile->lines == NULL) {
-      sourcefile->nlines = sourcefile->last_line + 100;
-      sourcefile->lines = ALLOC_N(uint64_t, sourcefile->nlines);
-      MEMZERO(sourcefile->lines, uint64_t, sourcefile->nlines);
-    }
+  sourcefile_t *srcfile = frame->srcfile;
+  long line = frame->line;
 
-    /* grow the per-line array if necessary */
-    if (sourcefile->last_line >= sourcefile->nlines) {
-      long prev_nlines = sourcefile->nlines;
-      sourcefile->nlines = sourcefile->last_line + 100;
-
-      REALLOC_N(sourcefile->lines, uint64_t, sourcefile->nlines);
-      MEMZERO(sourcefile->lines + prev_nlines, uint64_t, sourcefile->nlines - prev_nlines);
-    }
-
-    /* record the sample */
-    sourcefile->lines[sourcefile->last_line] += (now - sourcefile->last_time);
-    sourcefile->last_time = now;
+  /* allocate space for per-line data the first time */
+  if (srcfile->lines == NULL) {
+    srcfile->nlines = line + 100;
+    srcfile->lines = ALLOC_N(sourceline_t, srcfile->nlines);
+    MEMZERO(srcfile->lines, sourceline_t, srcfile->nlines);
   }
+
+  /* grow the per-line array if necessary */
+  if (line >= srcfile->nlines) {
+    long prev_nlines = srcfile->nlines;
+    srcfile->nlines = line + 100;
+
+    REALLOC_N(srcfile->lines, sourceline_t, srcfile->nlines);
+    MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
+  }
+
+  /* record the sample */
+  prof_time_t diff = now - frame->start;
+  sourceline_t *srcline = &(srcfile->lines[line]);
+  srcline->calls++;
+  srcline->total_time += diff;
+  if (diff > srcline->max_time)
+    srcline->max_time = diff;
 }
 
-static void
-profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+static inline sourcefile_t*
+sourcefile_lookup(char *filename)
 {
-  sourcefile_t *sourcefile = NULL;
-
-  if (!node) return;
-
-  char *file = node->nd_file;
-  long line  = nd_line(node);
-
-  if (!file) return;
-  if (line <= 0) return;
-
-  // skip duplicate events fast
-  if (file == rblineprof.last_file && line == rblineprof.last_line)
-    return;
-  rblineprof.last_file = file;
-  rblineprof.last_line = line;
+  sourcefile_t *srcfile = NULL;
 
   if (rblineprof.source_filename) { // single file mode
-    if (rblineprof.source_filename == file) {
-      sourcefile = &rblineprof.file;
-      sourcefile->filename = file;
+    if (rblineprof.source_filename == filename) { // compare char*, not contents
+      srcfile = &rblineprof.file;
+      srcfile->filename = filename;
     } else {
-      return;
+      return NULL;
     }
 
   } else { // regex mode
-    st_lookup(rblineprof.files, (st_data_t)file, (st_data_t *)&sourcefile);
+    st_lookup(rblineprof.files, (st_data_t)filename, (st_data_t *)&srcfile);
 
-    if ((VALUE)sourcefile == Qnil) // known negative match, skip
-      return;
+    if ((VALUE)srcfile == Qnil) // known negative match, skip
+      return NULL;
 
-    if (!sourcefile) { // unknown file, check against regex
-      if (rb_reg_search(rblineprof.source_regex, rb_str_new2(file), 0, 0) >= 0) {
-        sourcefile = ALLOC_N(sourcefile_t, 1);
-        MEMZERO(sourcefile, sourcefile_t, 1);
-        sourcefile->filename = strdup(file);
-        st_insert(rblineprof.files, (st_data_t)sourcefile->filename, (st_data_t)sourcefile);
+    if (!srcfile) { // unknown file, check against regex
+      if (rb_reg_search(rblineprof.source_regex, rb_str_new2(filename), 0, 0) >= 0) {
+        srcfile = ALLOC_N(sourcefile_t, 1);
+        MEMZERO(srcfile, sourcefile_t, 1);
+        srcfile->filename = strdup(filename);
+        st_insert(rblineprof.files, (st_data_t)srcfile->filename, (st_data_t)srcfile);
       } else { // no match, insert Qnil to prevent regex next time
-        st_insert(rblineprof.files, (st_data_t)strdup(file), (st_data_t)Qnil);
-        return;
+        st_insert(rblineprof.files, (st_data_t)strdup(filename), (st_data_t)Qnil);
+        return NULL;
       }
     }
   }
 
-  if (sourcefile) {
-    uint64_t now = timeofday_usec();
+  return srcfile;
+}
 
-    /* increment if the line in the current file changed */
-    if (sourcefile->last_line != line) {
-      sourcefile_record(sourcefile, now);
-    }
-    sourcefile->last_line = line;
+static void
+#ifndef RUBY_18
+profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
+#else
+profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#endif
+{
+  char *file;
+  long line;
+  stackframe_t *frame = NULL;
+  sourcefile_t *srcfile, *curr_srcfile;
+  prof_time_t now = timeofday_usec();
 
-    if (!sourcefile->last_time)
-      sourcefile->last_time = now;
+  /* file profiler: when invoking a method in a new file, account elapsed
+   * time to the current file and start a new timer.
+   */
+  if (!node) return;
 
-    /* if we came from another file, increment there and reset */
-    if (rblineprof.last_sourcefile && rblineprof.last_sourcefile != sourcefile) {
-      sourcefile_record(rblineprof.last_sourcefile, now);
-      rblineprof.last_sourcefile->last_line = 0;
-    }
+  file = rb_full_sourcefile();
+  line = nd_line(node);
+  if (!file) return;
+  if (line <= 0) return;
 
-    rblineprof.last_sourcefile = sourcefile;
+  srcfile = sourcefile_lookup(file);
+  curr_srcfile = rblineprof.curr_srcfile;
+
+  if (curr_srcfile != srcfile) {
+    if (curr_srcfile)
+      curr_srcfile->exclusive_time += now - curr_srcfile->exclusive_start;
+
+    if (srcfile)
+      srcfile->exclusive_start = now;
+
+    rblineprof.curr_srcfile = srcfile;
+  }
+
+  /* line profiler: maintain a stack of CALL events with timestamps. for
+   * each corresponding RETURN, account elapsed time to the calling line.
+   *
+   * we use ruby_current_node here to get the caller's file/line info,
+   * (as opposed to node, which points to the callee method being invoked)
+   */
+
+#ifndef RUBY_18
+  VALUE *caller_node = ruby_frame->node;
+#else
+  NODE *caller_node = ruby_frame->node;
+#endif
+
+  if (!caller_node) return;
+
+  file = rb_caller_sourcefile();
+  line = nd_line(caller_node);
+  if (!file) return;
+  if (line <= 0) return;
+
+  if (rb_caller_sourcefile() != rb_full_sourcefile())
+    srcfile = sourcefile_lookup(file);
+  if (!srcfile) return; /* skip line profiling for this file */
+
+  switch (event) {
+    case RUBY_EVENT_CALL:
+    case RUBY_EVENT_C_CALL:
+      rblineprof.stack_depth++;
+      if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
+        frame = &rblineprof.stack[rblineprof.stack_depth-1];
+        frame->event = event;
+        frame->node = node;
+        frame->self = self;
+        frame->mid = mid;
+        frame->klass = klass;
+        frame->line = line;
+        frame->start = now;
+        frame->srcfile = srcfile;
+      }
+      break;
+
+    case RUBY_EVENT_RETURN:
+    case RUBY_EVENT_C_RETURN:
+      do {
+        if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH)
+          frame = &rblineprof.stack[rblineprof.stack_depth-1];
+        else
+          frame = NULL;
+        rblineprof.stack_depth--;
+      } while (frame && frame->self != self && frame->mid != mid && frame->klass != klass);
+
+      if (frame)
+        stackframe_record(frame, now);
+
+      break;
   }
 }
 
@@ -165,17 +285,18 @@ cleanup_files(st_data_t key, st_data_t record, st_data_t arg)
 static int
 summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 {
-  sourcefile_t *sourcefile = (sourcefile_t*)record;
-  if (!sourcefile || (VALUE)sourcefile == Qnil) return ST_CONTINUE;
+  sourcefile_t *srcfile = (sourcefile_t*)record;
+  if (!srcfile || (VALUE)srcfile == Qnil) return ST_CONTINUE;
 
   VALUE ret = (VALUE)arg;
   VALUE ary = rb_ary_new();
   long i;
 
-  for (i=0; i<sourcefile->nlines; i++)
-    rb_ary_store(ary, i, ULL2NUM(sourcefile->lines[i]));
+  rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
+  for (i=1; i<srcfile->nlines; i++)
+    rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
 
-  rb_hash_aset(ret, rb_str_new2(sourcefile->filename), ary);
+  rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;
 }
@@ -208,9 +329,7 @@ lineprof(VALUE self, VALUE filename)
   }
 
   // reset state
-  rblineprof.last_file = NULL;
-  rblineprof.last_line = 0;
-  rblineprof.last_sourcefile = NULL;
+  rblineprof.curr_srcfile = NULL;
   st_foreach(rblineprof.files, cleanup_files, 0);
   if (rblineprof.file.lines) {
     xfree(rblineprof.file.lines);
@@ -219,18 +338,23 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_ALL);
+#ifdef RUBY_VM
+  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
+#else
+  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#endif
+
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
+
+  sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
+  if (curr_srcfile)
+    curr_srcfile->exclusive_time += timeofday_usec() - curr_srcfile->exclusive_start;
 
   VALUE ret = rb_hash_new();
   VALUE ary = Qnil;
 
   if (rblineprof.source_filename) {
-    long i;
-    ary = rb_ary_new();
-    for (i=0; i<rblineprof.file.nlines; i++)
-      rb_ary_store(ary, i, ULL2NUM(rblineprof.file.lines[i]));
-    rb_hash_aset(ret, rb_str_new2(rblineprof.source_filename), ary);
+    summarize_files(Qnil, (st_data_t)&rblineprof.file, ret);
   } else {
     st_foreach(rblineprof.files, summarize_files, ret);
   }
@@ -254,3 +378,5 @@ Init_rblineprof()
   rblineprof.files = st_init_strtable();
   rb_define_global_function("lineprof", lineprof, 1);
 }
+
+/* vim: ts=2,sw=2,expandtab */
