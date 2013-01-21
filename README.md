@@ -38,3 +38,4 @@
 * [method_profiler](https://github.com/change/method_profiler)
 * [ruby-prof](https://github.com/rdp/ruby-prof)
 * [perftools.rb](https://github.com/tmm1/perftools.rb)
+* [zenprofile](https://github.com/seattlerb/zenprofile)
