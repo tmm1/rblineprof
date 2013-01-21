@@ -280,6 +280,7 @@ lineprof_ensure(VALUE self)
 {
   rb_remove_event_hook(profiler_hook);
   rblineprof.enabled = false;
+  return self;
 }
 
 VALUE
