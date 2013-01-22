@@ -6,6 +6,10 @@
 #include <iseq.h>
 #include <ruby/re.h>
 
+// There's a compile error on 1.9.3. So:
+#ifdef RTYPEDDATA_DATA
+#define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+#endif
 #else
 #include <node.h>
 #include <env.h>
