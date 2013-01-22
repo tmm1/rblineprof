@@ -1,19 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-
 #include <ruby.h>
+#include <stdbool.h>
 
-#ifndef RUBY_VM
-#include <node.h>
-
+#ifdef RUBY_VM
+#include <vm_core.h>
+#include <iseq.h>
+#else
 #include <node.h>
 #include <env.h>
 #include <intern.h>
 #include <st.h>
 #include <re.h>
+#endif
 
+#ifndef RUBY_VM
 typedef rb_event_t rb_event_flag_t;
 #endif
 
@@ -218,21 +217,24 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 
 #ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
+  if (!caller_node) return;
 #else
-  VALUE *caller_node; // ruby_frame on 1.9?
+  rb_thread_t *thread = GET_THREAD();
+  rb_control_frame_t *cfp = thread->cfp;
+  rb_iseq_t *iseq = cfp->iseq;
 #endif
 
-  if (!caller_node) return;
 
 #ifndef RUBY_VM
   file = caller_node->nd_file;
-#else
-  file = "fixme";
-#endif
-
   line = nd_line(caller_node);
   if (!file) return;
   if (line <= 0) return;
+#else
+  StringValue(iseq->filename);
+  file = RSTRING_PTR(iseq->filename);
+  line = iseq->line_no;
+#endif
 
 #ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
@@ -316,6 +318,7 @@ lineprof_ensure(VALUE self)
 {
   rb_remove_event_hook((rb_event_hook_func_t) profiler_hook);
   rblineprof.enabled = false;
+  return self;
 }
 
 VALUE
@@ -389,4 +392,4 @@ Init_rblineprof()
   rb_define_global_function("lineprof", lineprof, 1);
 }
 
-/* vim: ts=2,sw=2,expandtab */
+
