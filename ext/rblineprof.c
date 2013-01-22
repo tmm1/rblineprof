@@ -4,6 +4,8 @@
 #ifdef RUBY_VM
 #include <vm_core.h>
 #include <iseq.h>
+#include <ruby/re.h>
+
 #else
 #include <node.h>
 #include <env.h>
@@ -174,6 +176,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
 #endif
 {
+
   char *file;
   long line;
   stackframe_t *frame = NULL;
@@ -185,13 +188,15 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
    */
   if (!node) return;
 
+  // We need to get the file and line from the event hook's node.
 #ifndef RUBY_VM
   file = node->nd_file;
+  line = nd_line(node);
 #else
   file = "wat";
+  line = 1;
 #endif
 
-  line = nd_line(node);
   if (!file) return;
   if (line <= 0) return;
 
@@ -236,13 +241,14 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   line = iseq->line_no;
 #endif
 
+
 #ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
 #else
-  if (caller_node != node)
+  if (file != node)
 #endif
-
     srcfile = sourcefile_lookup(file);
+
   if (!srcfile) return; /* skip line profiling for this file */
 
   switch (event) {
@@ -333,7 +339,7 @@ lineprof(VALUE self, VALUE filename)
   VALUE filename_class = rb_obj_class(filename);
 
   if (filename_class == rb_cString) {
-    rblineprof.source_filename = rb_source_filename(StringValuePtr(filename));
+    rblineprof.source_filename = (char *) (StringValuePtr(filename));
   } else if (filename_class == rb_cRegexp) {
     rblineprof.source_regex = filename;
     rblineprof.source_filename = NULL;
