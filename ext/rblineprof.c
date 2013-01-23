@@ -5,6 +5,7 @@
 #include <vm_core.h>
 #include <iseq.h>
 #include <ruby/re.h>
+#include <ruby/intern.h>
 
 // There's a compile error on 1.9.3. So:
 #ifdef RTYPEDDATA_DATA
@@ -190,15 +191,14 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   /* file profiler: when invoking a method in a new file, account elapsed
    * time to the current file and start a new timer.
    */
-  if (!node) return;
-
-  // We need to get the file and line from the event hook's node.
 #ifndef RUBY_VM
+  if (!node) return;
   file = node->nd_file;
   line = nd_line(node);
-#else // todo: need to get at actual file/line number here through *node
-  file = "test.rb";
-  line = 0;
+#else
+  rb_frame_method_id_and_class(&mid, &klass);
+  line = rb_sourceline();
+  file = rb_sourcefile();
 #endif
 
   if (!file) return;
@@ -235,7 +235,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   rb_control_frame_t *cfp = thread->cfp;
   rb_iseq_t *iseq = cfp->iseq;
 
-  StringValue(iseq->filename);
+  StringValue(iseq->filename); // segfault here
   file = RSTRING_PTR(iseq->filename);
   line = iseq->line_no;
 #endif
@@ -244,9 +244,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   if (line <= 0) return;
 
 #ifndef RUBY_VM
-  if (caller_node->nd_file != node->nd_file)
+  if (file != node->nd_file)
 #else
-  // todo: need to get at actual file name through node here and check equality
+  if (file != rb_sourcefile())
 #endif
     srcfile = sourcefile_lookup(file);
 
@@ -361,7 +361,7 @@ lineprof(VALUE self, VALUE filename)
 #ifndef RUBY_VM
   rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
 #else
-  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, self);
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, Qnil);
 #endif
 
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
