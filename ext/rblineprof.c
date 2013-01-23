@@ -237,7 +237,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   // ensure we have a string value
   StringValue(iseq->filepath);
   file = RSTRING_PTR(iseq->filepath);
-  line = iseq->line_no;
+  line = rb_vm_get_sourceline(cfp);
 #endif
 
   if (!file) return;
@@ -246,7 +246,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 #ifndef RUBY_VM
   if (file != node->nd_file)
 #else
-  if (file != rb_sourcefile())
+  if (strrchr(file, '/'+1) != rb_sourcefile());
 #endif
     srcfile = sourcefile_lookup(file);
 
