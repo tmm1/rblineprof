@@ -196,7 +196,6 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   file = node->nd_file;
   line = nd_line(node);
 #else
-  rb_frame_method_id_and_class(&mid, &klass);
   line = rb_sourceline();
   file = (char *) rb_sourcefile();
 #endif
@@ -223,11 +222,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
    * we use ruby_current_node here to get the caller's file/line info,
    * (as opposed to node, which points to the callee method being invoked)
    */
-
 #ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
   if (!caller_node) return;
-
   file = caller_node->nd_file;
   line = nd_line(caller_node);
 #else
@@ -236,7 +233,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   rb_iseq_t *iseq = cfp->iseq;
 
   if (!iseq) return;
-  StringValue(iseq->filepath); // segfault here
+
+  // ensure we have a string value
+  StringValue(iseq->filepath);
   file = RSTRING_PTR(iseq->filepath);
   line = iseq->line_no;
 #endif
