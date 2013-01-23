@@ -198,7 +198,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 #else
   rb_frame_method_id_and_class(&mid, &klass);
   line = rb_sourceline();
-  file = rb_sourcefile();
+  file = (char *) rb_sourcefile();
 #endif
 
   if (!file) return;
