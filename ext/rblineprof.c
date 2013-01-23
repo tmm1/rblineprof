@@ -235,8 +235,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   rb_control_frame_t *cfp = thread->cfp;
   rb_iseq_t *iseq = cfp->iseq;
 
-  StringValue(iseq->filename); // segfault here
-  file = RSTRING_PTR(iseq->filename);
+  if (!iseq) return;
+  StringValue(iseq->filepath); // segfault here
+  file = RSTRING_PTR(iseq->filepath);
   line = iseq->line_no;
 #endif
 
