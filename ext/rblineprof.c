@@ -10,6 +10,7 @@
 #ifdef RTYPEDDATA_DATA
 #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
 #endif
+
 #else
 #include <node.h>
 #include <env.h>
@@ -23,7 +24,6 @@ typedef rb_event_t rb_event_flag_t;
 #endif
 
 typedef uint64_t prof_time_t;
-
 static VALUE gc_hook;
 
 /*
@@ -196,9 +196,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 #ifndef RUBY_VM
   file = node->nd_file;
   line = nd_line(node);
-#else
-  file = "wat";
-  line = 1;
+#else // todo: need to get at actual file/line number here through *node
+  file = "test.rb";
+  line = 0;
 #endif
 
   if (!file) return;
@@ -227,29 +227,26 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 #ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
   if (!caller_node) return;
+
+  file = caller_node->nd_file;
+  line = nd_line(caller_node);
 #else
   rb_thread_t *thread = GET_THREAD();
   rb_control_frame_t *cfp = thread->cfp;
   rb_iseq_t *iseq = cfp->iseq;
-#endif
 
-
-#ifndef RUBY_VM
-  file = caller_node->nd_file;
-  line = nd_line(caller_node);
-  if (!file) return;
-  if (line <= 0) return;
-#else
   StringValue(iseq->filename);
   file = RSTRING_PTR(iseq->filename);
   line = iseq->line_no;
 #endif
 
+  if (!file) return;
+  if (line <= 0) return;
 
 #ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
 #else
-  if (file != node)
+  // todo: need to get at actual file name through node here and check equality
 #endif
     srcfile = sourcefile_lookup(file);
 
