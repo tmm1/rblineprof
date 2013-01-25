@@ -174,6 +174,7 @@ sourcefile_lookup(char *filename)
   return srcfile;
 }
 
+
 static void
 #ifndef RUBY_VM
 profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
@@ -181,7 +182,6 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
 #endif
 {
-
   char *file;
   long line;
   stackframe_t *frame = NULL;
@@ -246,7 +246,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 #ifndef RUBY_VM
   if (file != node->nd_file)
 #else
-  if (strrchr(file, '/'+1) != rb_sourcefile());
+  if (file != rb_sourcefile());
 #endif
     srcfile = sourcefile_lookup(file);
 
@@ -312,9 +312,10 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   long i;
 
   rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
-  for (i=1; i<srcfile->nlines; i++)
+  for (i=1; i<srcfile->nlines; i++) {
+    printf("calls (%4lli), time (%7lli) for line %li\n", srcfile->lines[i].calls, srcfile->lines[i].total_time, i);
     rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
-
+  }
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;
