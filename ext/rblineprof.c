@@ -312,10 +312,8 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   long i;
 
   rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
-  for (i=1; i<srcfile->nlines; i++) {
-    printf("calls (%4lli), time (%7lli) for line %li\n", srcfile->lines[i].calls, srcfile->lines[i].total_time, i);
+  for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
-  }
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;
