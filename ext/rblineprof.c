@@ -261,9 +261,11 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   rb_thread_t *th = GET_THREAD();
   rb_control_frame_t *cfp = rb_vm_get_caller(th, th->cfp, mid);
   if (!cfp) return;
-  if (!RTEST(cfp->iseq->filepath)) return;
 
-  file = StringValueCStr(cfp->iseq->filepath);
+  if (RTEST(cfp->iseq->filepath))
+    file = StringValueCStr(cfp->iseq->filepath);
+  else
+    file = StringValueCStr(cfp->iseq->filename);
   line = rb_vm_get_sourceline(cfp);
 #endif
 
