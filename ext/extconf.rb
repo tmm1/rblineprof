@@ -17,8 +17,6 @@ def add_define(name)
 end
 
 if RUBY_VERSION >= "1.9"
-  add_define 'RUBY19'
-
   hdrs = proc {
     have_header("vm_core.h") and
     have_header("iseq.h")
@@ -29,7 +27,5 @@ if RUBY_VERSION >= "1.9"
     exit(1)
   end
 else
-  add_define 'RUBY18'
   create_makefile 'rblineprof'
 end
-
