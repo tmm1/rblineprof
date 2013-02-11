@@ -174,6 +174,25 @@ sourcefile_lookup(char *filename)
   return srcfile;
 }
 
+#ifdef RUBY_VM
+rb_control_frame_t *
+rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
+{
+  int level = 0;
+
+  while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
+    if (++level == 1 && mid == 0) {
+      // skip method definition line
+    } else if (cfp->iseq != 0 && cfp->pc != 0) {
+      return cfp;
+    }
+
+    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+  }
+
+  return 0;
+}
+#endif
 
 static void
 #ifndef RUBY_VM
@@ -231,15 +250,11 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   file = caller_node->nd_file;
   line = nd_line(caller_node);
 #else
-  rb_thread_t *thread = GET_THREAD();
-  rb_control_frame_t *cfp = thread->cfp;
-  rb_iseq_t *iseq = cfp->iseq;
+  rb_thread_t *th = GET_THREAD();
+  rb_control_frame_t *cfp = rb_vm_get_caller(th, th->cfp, mid);
+  if (!cfp) return;
 
-  if (!iseq) return;
-
-  // ensure we have a string value
-  StringValue(iseq->filepath);
-  file = RSTRING_PTR(iseq->filepath);
+  file = RSTRING_PTR(cfp->iseq->filepath);
   line = rb_vm_get_sourceline(cfp);
 #endif
 
