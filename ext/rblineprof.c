@@ -1,17 +1,26 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-
 #include <ruby.h>
-#include <node.h>
-#include <env.h>
-#include <intern.h>
-#include <st.h>
-#include <re.h>
+#include <stdbool.h>
+
+#ifdef RUBY_VM
+  #include <ruby/re.h>
+  #include <ruby/intern.h>
+  #include <vm_core.h>
+  #include <iseq.h>
+
+  // There's a compile error on 1.9.3. So:
+  #ifdef RTYPEDDATA_DATA
+  #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+  #endif
+#else
+  #include <st.h>
+  #include <re.h>
+  #include <intern.h>
+  #include <node.h>
+  #include <env.h>
+  typedef rb_event_t rb_event_flag_t;
+#endif
 
 typedef uint64_t prof_time_t;
-
 static VALUE gc_hook;
 
 /*
@@ -42,8 +51,12 @@ typedef struct sourcefile {
  */
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
-  rb_event_t event;
+  rb_event_flag_t event;
+#ifdef RUBY_VM
+  rb_thread_t *thread;
+#else
   NODE *node;
+#endif
   VALUE self;
   ID mid;
   VALUE klass;
@@ -128,7 +141,11 @@ sourcefile_lookup(char *filename)
   sourcefile_t *srcfile = NULL;
 
   if (rblineprof.source_filename) { // single file mode
+#ifdef RUBY_VM
+    if (strcmp(rblineprof.source_filename, filename) == 0) {
+#else
     if (rblineprof.source_filename == filename) { // compare char*, not contents
+#endif
       srcfile = &rblineprof.file;
       srcfile->filename = filename;
     } else {
@@ -157,8 +174,39 @@ sourcefile_lookup(char *filename)
   return srcfile;
 }
 
+#ifdef RUBY_VM
+/* Find the source of the current method call. This is based on rb_f_caller
+ * in vm_eval.c, and replicates the behavior of `caller.first` from ruby.
+ *
+ * On method calls, ruby 1.9 sends an extra RUBY_EVENT_CALL event with mid=0. The
+ * top-most cfp on the stack in these cases points to the 'def method' line, so we skip
+ * these and grab the second caller instead.
+ */
+rb_control_frame_t *
+rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
+{
+  int level = 0;
+
+  while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
+    if (++level == 1 && mid == 0) {
+      // skip method definition line
+    } else if (cfp->iseq != 0 && cfp->pc != 0) {
+      return cfp;
+    }
+
+    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+  }
+
+  return 0;
+}
+#endif
+
 static void
-profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#ifdef RUBY_VM
+profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass)
+#else
+profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
+#endif
 {
   char *file;
   long line;
@@ -166,13 +214,20 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
   sourcefile_t *srcfile, *curr_srcfile;
   prof_time_t now = timeofday_usec();
 
+#ifndef RUBY_VM
   /* file profiler: when invoking a method in a new file, account elapsed
    * time to the current file and start a new timer.
    */
+#ifndef RUBY_VM
   if (!node) return;
-
   file = node->nd_file;
   line = nd_line(node);
+#else
+  // this returns filename (instead of filepath) on 1.9
+  file = (char *) rb_sourcefile();
+  line = rb_sourceline();
+#endif
+
   if (!file) return;
   if (line <= 0) return;
 
@@ -188,6 +243,7 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 
     rblineprof.curr_srcfile = srcfile;
   }
+#endif
 
   /* line profiler: maintain a stack of CALL events with timestamps. for
    * each corresponding RETURN, account elapsed time to the calling line.
@@ -195,16 +251,32 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
    * we use ruby_current_node here to get the caller's file/line info,
    * (as opposed to node, which points to the callee method being invoked)
    */
+#ifndef RUBY_VM
   NODE *caller_node = ruby_frame->node;
   if (!caller_node) return;
 
   file = caller_node->nd_file;
   line = nd_line(caller_node);
+#else
+  rb_thread_t *th = GET_THREAD();
+  rb_control_frame_t *cfp = rb_vm_get_caller(th, th->cfp, mid);
+  if (!cfp) return;
+
+  if (RTEST(cfp->iseq->filepath))
+    file = StringValueCStr(cfp->iseq->filepath);
+  else
+    file = StringValueCStr(cfp->iseq->filename);
+  line = rb_vm_get_sourceline(cfp);
+#endif
+
   if (!file) return;
   if (line <= 0) return;
 
+#ifndef RUBY_VM
   if (caller_node->nd_file != node->nd_file)
+#endif
     srcfile = sourcefile_lookup(file);
+
   if (!srcfile) return; /* skip line profiling for this file */
 
   switch (event) {
@@ -214,7 +286,12 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
       if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
+
+#ifdef RUBY_VM
+        frame->thread = th;
+#else
         frame->node = node;
+#endif
         frame->self = self;
         frame->mid = mid;
         frame->klass = klass;
@@ -232,7 +309,13 @@ profiler_hook(rb_event_t event, NODE *node, VALUE self, ID mid, VALUE klass)
         else
           frame = NULL;
         rblineprof.stack_depth--;
-      } while (frame && frame->self != self && frame->mid != mid && frame->klass != klass);
+      } while (frame &&
+#ifdef RUBY_VM
+               frame->thread != th &&
+#endif
+               frame->self != self &&
+               frame->mid != mid &&
+               frame->klass != klass);
 
       if (frame)
         stackframe_record(frame, now);
@@ -269,7 +352,6 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
   for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
-
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;
@@ -278,8 +360,9 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
 static VALUE
 lineprof_ensure(VALUE self)
 {
-  rb_remove_event_hook(profiler_hook);
+  rb_remove_event_hook((rb_event_hook_func_t) profiler_hook);
   rblineprof.enabled = false;
+  return self;
 }
 
 VALUE
@@ -294,7 +377,14 @@ lineprof(VALUE self, VALUE filename)
   VALUE filename_class = rb_obj_class(filename);
 
   if (filename_class == rb_cString) {
+#ifdef RUBY_VM
+    rblineprof.source_filename = (char *) (StringValuePtr(filename));
+#else
+    /* rb_source_filename will return a string we can compare directly against
+     * node->file, without a strcmp()
+     */
     rblineprof.source_filename = rb_source_filename(StringValuePtr(filename));
+#endif
   } else if (filename_class == rb_cRegexp) {
     rblineprof.source_regex = filename;
     rblineprof.source_filename = NULL;
@@ -312,7 +402,12 @@ lineprof(VALUE self, VALUE filename)
   }
 
   rblineprof.enabled = true;
-  rb_add_event_hook(profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#ifndef RUBY_VM
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN);
+#else
+  rb_add_event_hook((rb_event_hook_func_t) profiler_hook, RUBY_EVENT_CALL|RUBY_EVENT_RETURN|RUBY_EVENT_C_CALL|RUBY_EVENT_C_RETURN, Qnil);
+#endif
+
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
@@ -348,4 +443,4 @@ Init_rblineprof()
   rb_define_global_function("lineprof", lineprof, 1);
 }
 
-/* vim: ts=2,sw=2,expandtab */
+/* vim: set ts=2 sw=2 expandtab: */

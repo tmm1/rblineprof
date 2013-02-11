@@ -38,8 +38,9 @@ profile = lineprof(/./) do
   outer
 end
 
-File.readlines(__FILE__).each_with_index do |line, num|
-  time, calls = profile[__FILE__][num+1]
+file = File.expand_path(__FILE__)
+File.readlines(file).each_with_index do |line, num|
+  time, calls = profile[file][num+1]
   if calls && calls > 0
     printf "% 8.1fms (% 5d) | %s", time/1000.0, calls, line
   else
