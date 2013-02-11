@@ -145,7 +145,11 @@ sourcefile_lookup(char *filename)
   sourcefile_t *srcfile = NULL;
 
   if (rblineprof.source_filename) { // single file mode
+#ifdef RUBY_VM
+    if (strcmp(rblineprof.source_filename, filename) == 0) {
+#else
     if (rblineprof.source_filename == filename) { // compare char*, not contents
+#endif
       srcfile = &rblineprof.file;
       srcfile->filename = filename;
     } else {
@@ -365,7 +369,14 @@ lineprof(VALUE self, VALUE filename)
   VALUE filename_class = rb_obj_class(filename);
 
   if (filename_class == rb_cString) {
+#ifdef RUBY_VM
     rblineprof.source_filename = (char *) (StringValuePtr(filename));
+#else
+    /* rb_source_filename will return a string we can compare directly against
+     * node->file, without a strcmp()
+     */
+    rblineprof.source_filename = rb_source_filename(StringValuePtr(filename));
+#endif
   } else if (filename_class == rb_cRegexp) {
     rblineprof.source_regex = filename;
     rblineprof.source_filename = NULL;
