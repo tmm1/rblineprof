@@ -2,25 +2,21 @@
 #include <stdbool.h>
 
 #ifdef RUBY_VM
-#include <vm_core.h>
-#include <iseq.h>
 #include <ruby/re.h>
 #include <ruby/intern.h>
+#include <vm_core.h>
+#include <iseq.h>
 
 // There's a compile error on 1.9.3. So:
 #ifdef RTYPEDDATA_DATA
 #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
 #endif
-
 #else
-#include <node.h>
-#include <env.h>
-#include <intern.h>
 #include <st.h>
 #include <re.h>
-#endif
-
-#ifndef RUBY_VM
+#include <intern.h>
+#include <node.h>
+#include <env.h>
 typedef rb_event_t rb_event_flag_t;
 #endif
 
