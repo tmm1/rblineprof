@@ -398,4 +398,4 @@ Init_rblineprof()
   rb_define_global_function("lineprof", lineprof, 1);
 }
 
-/* vim: ts=2,sw=2,expandtab */
+/* vim: set ts=2 sw=2 expandtab: */
