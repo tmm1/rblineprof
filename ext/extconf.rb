@@ -5,14 +5,9 @@ if RUBY_VERSION >= "1.9"
   begin
     require "debugger/ruby_core_source"
   rescue LoadError
-    require 'rubygems/user_interaction' # for 1.9.1
     require 'rubygems/dependency_installer'
     installer = Gem::DependencyInstaller.new
     installer.install 'debugger-ruby_core_source'
-
-    Gem.refresh
-    Gem.activate('debugger-ruby_core_source') # for 1.9.1
-
     require "debugger/ruby_core_source"
   end
 end
