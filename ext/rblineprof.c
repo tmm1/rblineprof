@@ -175,6 +175,13 @@ sourcefile_lookup(char *filename)
 }
 
 #ifdef RUBY_VM
+/* Find the source of the current method call. This is based on rb_f_caller
+ * in vm_eval.c, and replicates the behavior of `caller.first` from ruby.
+ *
+ * On method calls, ruby 1.9 sends an extra RUBY_EVENT_CALL event with mid=0. The
+ * top-most cfp on the stack in these cases points to the 'def method' line, so we skip
+ * these and grab the second caller instead.
+ */
 rb_control_frame_t *
 rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
 {
