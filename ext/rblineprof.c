@@ -273,7 +273,7 @@ profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass
   if (line <= 0) return;
 
 #ifndef RUBY_VM
-  if (node->nd_file != node->nd_file)
+  if (caller_node->nd_file != node->nd_file)
 #endif
     srcfile = sourcefile_lookup(file);
 
