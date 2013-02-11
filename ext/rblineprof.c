@@ -188,6 +188,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   sourcefile_t *srcfile, *curr_srcfile;
   prof_time_t now = timeofday_usec();
 
+#ifndef RUBY_VM
   /* file profiler: when invoking a method in a new file, account elapsed
    * time to the current file and start a new timer.
    */
@@ -196,8 +197,9 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   file = node->nd_file;
   line = nd_line(node);
 #else
-  line = rb_sourceline();
+  // this returns filename (instead of filepath) on 1.9
   file = (char *) rb_sourcefile();
+  line = rb_sourceline();
 #endif
 
   if (!file) return;
@@ -215,6 +217,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
 
     rblineprof.curr_srcfile = srcfile;
   }
+#endif
 
   /* line profiler: maintain a stack of CALL events with timestamps. for
    * each corresponding RETURN, account elapsed time to the calling line.
