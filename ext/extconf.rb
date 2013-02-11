@@ -1,5 +1,4 @@
 require 'mkmf'
-require 'fileutils'
 
 if RUBY_VERSION >= "1.9"
   begin
@@ -10,13 +9,7 @@ if RUBY_VERSION >= "1.9"
     installer.install 'debugger-ruby_core_source'
     require "debugger/ruby_core_source"
   end
-end
 
-def add_define(name)
-  $defs.push("-D#{name}")
-end
-
-if RUBY_VERSION >= "1.9"
   hdrs = proc {
     have_header("vm_core.h") and
     have_header("iseq.h")
