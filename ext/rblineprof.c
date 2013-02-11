@@ -52,10 +52,10 @@ typedef struct sourcefile {
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
   rb_event_flag_t event;
-#ifndef RUBY_VM
-  NODE *node;
+#ifdef RUBY_VM
+  rb_thread_t *thread;
 #else
-  VALUE data;
+  NODE *node;
 #endif
   VALUE self;
   ID mid;
@@ -202,10 +202,10 @@ rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
 #endif
 
 static void
-#ifndef RUBY_VM
-profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
-#else
+#ifdef RUBY_VM
 profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass)
+#else
+profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 #endif
 {
   char *file;
@@ -283,7 +283,9 @@ profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
 
-#ifndef RUBY_VM
+#ifdef RUBY_VM
+        frame->thread = th;
+#else
         frame->node = node;
 #endif
         frame->self = self;
@@ -303,7 +305,13 @@ profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass
         else
           frame = NULL;
         rblineprof.stack_depth--;
-      } while (frame && frame->self != self && frame->mid != mid && frame->klass != klass);
+      } while (frame &&
+#ifdef RUBY_VM
+               frame->thread != th &&
+#endif
+               frame->self != self &&
+               frame->mid != mid &&
+               frame->klass != klass);
 
       if (frame)
         stackframe_record(frame, now);
