@@ -59,7 +59,7 @@ typedef struct stackframe {
 #ifndef RUBY_VM
   NODE *node;
 #else
-  VALUE *node;
+  VALUE data;
 #endif
   VALUE self;
   ID mid;
@@ -198,7 +198,7 @@ static void
 #ifndef RUBY_VM
 profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass)
 #else
-profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klass)
+profiler_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE klass)
 #endif
 {
   char *file;
@@ -262,9 +262,7 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
   if (line <= 0) return;
 
 #ifndef RUBY_VM
-  if (file != node->nd_file)
-#else
-  if (file != rb_sourcefile());
+  if (node->nd_file != node->nd_file)
 #endif
     srcfile = sourcefile_lookup(file);
 
@@ -277,7 +275,10 @@ profiler_hook(rb_event_flag_t event, VALUE *node, VALUE self, ID mid, VALUE klas
       if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
+
+#ifndef RUBY_VM
         frame->node = node;
+#endif
         frame->self = self;
         frame->mid = mid;
         frame->klass = klass;
