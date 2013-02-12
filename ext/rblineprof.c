@@ -214,7 +214,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   sourcefile_t *srcfile, *curr_srcfile;
   prof_time_t now = timeofday_usec();
 
-#ifndef RUBY_VM
+#if 0
   /* file profiler: when invoking a method in a new file, account elapsed
    * time to the current file and start a new timer.
    */
