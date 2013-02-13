@@ -89,6 +89,12 @@ static struct {
   // regex mode, store file data in hash table
   VALUE source_regex;
   st_table *files;
+
+  // cache
+  struct {
+    char *file;
+    sourcefile_t *srcfile;
+  } cache;
 }
 rblineprof = {
   .enabled = false,
@@ -214,7 +220,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   sourcefile_t *srcfile, *curr_srcfile;
   prof_time_t now = timeofday_usec();
 
-#ifndef RUBY_VM
+#if 0
   /* file profiler: when invoking a method in a new file, account elapsed
    * time to the current file and start a new timer.
    */
@@ -272,11 +278,20 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   if (!file) return;
   if (line <= 0) return;
 
-#ifndef RUBY_VM
-  if (caller_node->nd_file != node->nd_file)
-#endif
+  /* find the srcfile entry for the current file.
+   *
+   * first check the cache, in case this is the same file as
+   * the previous invocation.
+   *
+   * if no record is found, we don't care about profiling this
+   * file and return early.
+   */
+  if (rblineprof.cache.file == file)
+    srcfile = rblineprof.cache.srcfile;
+  else
     srcfile = sourcefile_lookup(file);
-
+  rblineprof.cache.file = file;
+  rblineprof.cache.srcfile = srcfile;
   if (!srcfile) return; /* skip line profiling for this file */
 
   switch (event) {
@@ -400,6 +415,8 @@ lineprof(VALUE self, VALUE filename)
     rblineprof.file.lines = NULL;
     rblineprof.file.nlines = 0;
   }
+  rblineprof.cache.file = NULL;
+  rblineprof.cache.srcfile = NULL;
 
   rblineprof.enabled = true;
 #ifndef RUBY_VM
