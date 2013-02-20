@@ -38,9 +38,15 @@ typedef struct sourceline {
  */
 typedef struct sourcefile {
   char *filename;
+
+  /* per line timing */
   long nlines;
   sourceline_t *lines;
 
+  /* overall file timing */
+  prof_time_t total_time;
+  prof_time_t child_time;
+  uint64_t depth;
   prof_time_t exclusive_start;
   prof_time_t exclusive_time;
 } sourcefile_t;
@@ -79,9 +85,6 @@ static struct {
   stackframe_t stack[MAX_STACK_DEPTH];
   uint64_t stack_depth;
 
-  // current file
-  sourcefile_t *curr_srcfile;
-
   // single file mode, store filename and line data directly
   char *source_filename;
   sourcefile_t file;
@@ -111,7 +114,7 @@ timeofday_usec()
 }
 
 static inline void
-stackframe_record(stackframe_t *frame, prof_time_t now)
+stackframe_record(stackframe_t *frame, prof_time_t now, stackframe_t *caller_frame)
 {
   sourcefile_t *srcfile = frame->srcfile;
   long line = frame->line;
@@ -132,13 +135,22 @@ stackframe_record(stackframe_t *frame, prof_time_t now)
     MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
   }
 
-  /* record the sample */
   prof_time_t diff = now - frame->start;
+
+  /* record the line sample */
   sourceline_t *srcline = &(srcfile->lines[line]);
   srcline->calls++;
   srcline->total_time += diff;
   if (diff > srcline->max_time)
     srcline->max_time = diff;
+
+  /* record the file sample */
+  if (srcfile->depth == 0)
+    srcfile->total_time += diff;
+
+  /* record into the parent file too */
+  if (caller_frame && caller_frame->srcfile != srcfile)
+    caller_frame->srcfile->child_time += diff;
 }
 
 static inline sourcefile_t*
@@ -188,6 +200,7 @@ sourcefile_lookup(char *filename)
  * top-most cfp on the stack in these cases points to the 'def method' line, so we skip
  * these and grab the second caller instead.
  */
+static inline
 rb_control_frame_t *
 rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
 {
@@ -216,40 +229,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 {
   char *file;
   long line;
-  stackframe_t *frame = NULL;
-  sourcefile_t *srcfile, *curr_srcfile;
-  prof_time_t now = timeofday_usec();
-
-#if 0
-  /* file profiler: when invoking a method in a new file, account elapsed
-   * time to the current file and start a new timer.
-   */
-#ifndef RUBY_VM
-  if (!node) return;
-  file = node->nd_file;
-  line = nd_line(node);
-#else
-  // this returns filename (instead of filepath) on 1.9
-  file = (char *) rb_sourcefile();
-  line = rb_sourceline();
-#endif
-
-  if (!file) return;
-  if (line <= 0) return;
-
-  srcfile = sourcefile_lookup(file);
-  curr_srcfile = rblineprof.curr_srcfile;
-
-  if (curr_srcfile != srcfile) {
-    if (curr_srcfile)
-      curr_srcfile->exclusive_time += now - curr_srcfile->exclusive_start;
-
-    if (srcfile)
-      srcfile->exclusive_start = now;
-
-    rblineprof.curr_srcfile = srcfile;
-  }
-#endif
+  stackframe_t *frame = NULL, *prev = NULL;
+  sourcefile_t *srcfile;
 
   /* line profiler: maintain a stack of CALL events with timestamps. for
    * each corresponding RETURN, account elapsed time to the calling line.
@@ -294,35 +275,52 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   rblineprof.cache.srcfile = srcfile;
   if (!srcfile) return; /* skip line profiling for this file */
 
+  prof_time_t now = timeofday_usec();
+
   switch (event) {
     case RUBY_EVENT_CALL:
     case RUBY_EVENT_C_CALL:
       rblineprof.stack_depth++;
+      srcfile->depth++;
+      if (srcfile->depth == 1)
+        srcfile->exclusive_start = now;
+
       if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
-
-#ifdef RUBY_VM
-        frame->thread = th;
-#else
-        frame->node = node;
-#endif
         frame->self = self;
         frame->mid = mid;
         frame->klass = klass;
         frame->line = line;
         frame->start = now;
         frame->srcfile = srcfile;
+#ifdef RUBY_VM
+        frame->thread = th;
+#else
+        frame->node = node;
+#endif
+      }
+
+      if (rblineprof.stack_depth > 1) {
+        prev = &rblineprof.stack[rblineprof.stack_depth-2];
+
+        if (prev->srcfile != frame->srcfile) {
+          prev->srcfile->exclusive_time += now - prev->srcfile->exclusive_start;
+          prev->srcfile->exclusive_start = now;
+        }
       }
       break;
 
     case RUBY_EVENT_RETURN:
     case RUBY_EVENT_C_RETURN:
       do {
-        if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH)
+        if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
           frame = &rblineprof.stack[rblineprof.stack_depth-1];
-        else
+          if (frame->srcfile->depth > 0)
+            frame->srcfile->depth--;
+        } else
           frame = NULL;
+
         rblineprof.stack_depth--;
       } while (frame &&
 #ifdef RUBY_VM
@@ -332,8 +330,18 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
                frame->mid != mid &&
                frame->klass != klass);
 
+      if (rblineprof.stack_depth > 0) {
+        prev = &rblineprof.stack[rblineprof.stack_depth-1];
+
+        if (frame->srcfile != prev->srcfile) {
+          frame->srcfile->exclusive_time += now - frame->srcfile->exclusive_start;
+          frame->srcfile->exclusive_start = now;
+          prev->srcfile->exclusive_start = now;
+        }
+      }
+
       if (frame)
-        stackframe_record(frame, now);
+        stackframe_record(frame, now, prev);
 
       break;
   }
@@ -364,7 +372,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   VALUE ary = rb_ary_new();
   long i;
 
-  rb_ary_store(ary, 0, ULL2NUM(srcfile->exclusive_time));
+  rb_ary_store(ary, 0, rb_ary_new3(3, ULL2NUM(srcfile->total_time), ULL2NUM(srcfile->child_time), ULL2NUM(srcfile->exclusive_time)));
   for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
@@ -408,7 +416,6 @@ lineprof(VALUE self, VALUE filename)
   }
 
   // reset state
-  rblineprof.curr_srcfile = NULL;
   st_foreach(rblineprof.files, cleanup_files, 0);
   if (rblineprof.file.lines) {
     xfree(rblineprof.file.lines);
@@ -426,10 +433,6 @@ lineprof(VALUE self, VALUE filename)
 #endif
 
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
-
-  sourcefile_t *curr_srcfile = rblineprof.curr_srcfile;
-  if (curr_srcfile)
-    curr_srcfile->exclusive_time += timeofday_usec() - curr_srcfile->exclusive_start;
 
   VALUE ret = rb_hash_new();
   VALUE ary = Qnil;
