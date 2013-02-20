@@ -9,6 +9,12 @@ class Obj
   def another(options={})
     sleep 0.001
   end
+
+  class_eval <<-RUBY, 'otherfile.rb', 1
+    def other_file
+      another
+    end
+  RUBY
 end
 
 def inner
@@ -22,6 +28,7 @@ def inner
   o = Obj.new
   o.inner_block
   o.another
+  o.other_file
 end
 
 def outer
@@ -46,4 +53,14 @@ File.readlines(file).each_with_index do |line, num|
   else
     printf "                   | %s", line
   end
+end
+
+puts
+profile.each do |file, data|
+  total, child, exclusive = data[0]
+  puts file
+  printf "  % 10.1fms in this file\n", exclusive/1000.0
+  printf "  % 10.1fms in this file + children\n", total/1000.0
+  printf "  % 10.1fms in children\n", child/1000.0
+  puts
 end
