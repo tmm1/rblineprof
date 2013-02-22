@@ -24,18 +24,24 @@
 
 static VALUE gc_hook;
 
+/*
+ * Time in microseconds
+ */
 typedef uint64_t prof_time_t;
+
+/*
+ * Profiling snapshot
+ */
 typedef struct snapshot {
   prof_time_t wall;
   prof_time_t cpu;
 } snapshot_t;
 
 /*
- * Struct representing an individual line of
- * Ruby source code
+ * A line of Ruby source code
  */
 typedef struct sourceline {
-  uint64_t calls; // total number of calls
+  uint64_t calls; // total number of call/c_call events
   snapshot_t total_time;
   snapshot_t max_time;
 } sourceline_t;
@@ -144,6 +150,24 @@ walltime_usec()
          (prof_time_t)tv.tv_usec;
 }
 
+static inline snapshot_t
+snapshot_diff(snapshot_t t1, snapshot_t t2)
+{
+  snapshot_t diff = {
+    .wall = t1.wall - t2.wall,
+    .cpu  = t1.cpu  - t2.cpu
+  };
+
+  return diff;
+}
+
+static inline void
+snapshot_increment(snapshot_t *s, snapshot_t inc)
+{
+  s->wall += inc.wall;
+  s->cpu  += inc.cpu;
+}
+
 static inline void
 stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_frame)
 {
@@ -166,32 +190,25 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
     MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
   }
 
-  snapshot_t diff = {
-    .wall = now.wall - frame->start.wall,
-    .cpu  = now.cpu - frame->start.cpu
-  };
+  snapshot_t diff = snapshot_diff(now, frame->start);
 
   /* record the line sample */
   sourceline_t *srcline = &(srcfile->lines[line]);
   srcline->calls++;
-  srcline->total_time.cpu += diff.cpu;
-  srcline->total_time.wall += diff.wall;
+  snapshot_increment(&srcline->total_time, diff);
+
   if (diff.cpu > srcline->max_time.cpu)
     srcline->max_time.cpu = diff.cpu;
   if (diff.wall > srcline->max_time.wall)
     srcline->max_time.wall = diff.wall;
 
   /* record the file sample */
-  if (srcfile->depth == 0) {
-    srcfile->total_time.cpu += diff.cpu;
-    srcfile->total_time.wall += diff.wall;
-  }
+  if (srcfile->depth == 0)
+    snapshot_increment(&srcfile->total_time, diff);
 
   /* record into the parent file too */
-  if (caller_frame && caller_frame->srcfile != srcfile) {
-    caller_frame->srcfile->child_time.cpu += diff.cpu;
-    caller_frame->srcfile->child_time.wall += diff.wall;
-  }
+  if (caller_frame && caller_frame->srcfile != srcfile)
+    snapshot_increment(&caller_frame->srcfile->child_time, diff);
 }
 
 static inline sourcefile_t*
@@ -354,8 +371,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         prev = &rblineprof.stack[rblineprof.stack_depth-2];
 
         if (prev->srcfile != frame->srcfile) {
-          prev->srcfile->exclusive_time.cpu += now.cpu - prev->srcfile->exclusive_start.cpu;
-          prev->srcfile->exclusive_time.wall += now.wall - prev->srcfile->exclusive_start.wall;
+          snapshot_t diff = snapshot_diff(now, prev->srcfile->exclusive_start);
+          snapshot_increment(&prev->srcfile->exclusive_time, diff);
           prev->srcfile->exclusive_start = now;
         }
       }
@@ -384,8 +401,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         prev = &rblineprof.stack[rblineprof.stack_depth-1];
 
         if (frame->srcfile != prev->srcfile) {
-          frame->srcfile->exclusive_time.cpu += now.cpu - frame->srcfile->exclusive_start.cpu;
-          frame->srcfile->exclusive_time.wall += now.wall - frame->srcfile->exclusive_start.wall;
+          snapshot_t diff = snapshot_diff(now, frame->srcfile->exclusive_start);
+          snapshot_increment(&frame->srcfile->exclusive_time, diff);
           frame->srcfile->exclusive_start = now;
           prev->srcfile->exclusive_start = now;
         }
