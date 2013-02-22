@@ -1,5 +1,7 @@
 #include <ruby.h>
 #include <stdbool.h>
+#include <time.h>
+#include <sys/resource.h>
 
 #ifdef RUBY_VM
   #include <ruby/re.h>
@@ -20,8 +22,13 @@
   typedef rb_event_t rb_event_flag_t;
 #endif
 
-typedef uint64_t prof_time_t;
 static VALUE gc_hook;
+
+typedef uint64_t prof_time_t;
+typedef struct snapshot {
+  prof_time_t wall;
+  prof_time_t cpu;
+} snapshot_t;
 
 /*
  * Struct representing an individual line of
@@ -29,8 +36,8 @@ static VALUE gc_hook;
  */
 typedef struct sourceline {
   uint64_t calls; // total number of calls
-  prof_time_t total_time;
-  prof_time_t max_time;
+  snapshot_t total_time;
+  snapshot_t max_time;
 } sourceline_t;
 
 /*
@@ -44,11 +51,11 @@ typedef struct sourcefile {
   sourceline_t *lines;
 
   /* overall file timing */
-  prof_time_t total_time;
-  prof_time_t child_time;
+  snapshot_t total_time;
+  snapshot_t child_time;
   uint64_t depth;
-  prof_time_t exclusive_start;
-  prof_time_t exclusive_time;
+  snapshot_t exclusive_start;
+  snapshot_t exclusive_time;
 } sourcefile_t;
 
 /*
@@ -70,7 +77,7 @@ typedef struct stackframe {
   char *filename;
   long line;
 
-  prof_time_t start;
+  snapshot_t start;
   sourcefile_t *srcfile;
 } stackframe_t;
 
@@ -105,7 +112,31 @@ rblineprof = {
 };
 
 static prof_time_t
-timeofday_usec()
+cputime_usec()
+{
+#if defined(__linux__)
+  struct timespec ts;
+
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0)
+    return (prof_time_t)ts.tv_sec*1e6 +
+           (prof_time_t)ts.tv_nsec*1e-3;
+  }
+#endif
+
+#if defined RUSAGE_SELF
+  struct rusage usage;
+  struct timeval time;
+  getrusage(RUSAGE_SELF, &usage);
+  time = usage.ru_utime;
+  return (prof_time_t)time.tv_sec*1e6 +
+         (prof_time_t)time.tv_usec;
+#endif
+
+  return 0;
+}
+
+static prof_time_t
+walltime_usec()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -114,7 +145,7 @@ timeofday_usec()
 }
 
 static inline void
-stackframe_record(stackframe_t *frame, prof_time_t now, stackframe_t *caller_frame)
+stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_frame)
 {
   sourcefile_t *srcfile = frame->srcfile;
   long line = frame->line;
@@ -135,22 +166,32 @@ stackframe_record(stackframe_t *frame, prof_time_t now, stackframe_t *caller_fra
     MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
   }
 
-  prof_time_t diff = now - frame->start;
+  snapshot_t diff = {
+    .wall = now.wall - frame->start.wall,
+    .cpu  = now.cpu - frame->start.cpu
+  };
 
   /* record the line sample */
   sourceline_t *srcline = &(srcfile->lines[line]);
   srcline->calls++;
-  srcline->total_time += diff;
-  if (diff > srcline->max_time)
-    srcline->max_time = diff;
+  srcline->total_time.cpu += diff.cpu;
+  srcline->total_time.wall += diff.wall;
+  if (diff.cpu > srcline->max_time.cpu)
+    srcline->max_time.cpu = diff.cpu;
+  if (diff.wall > srcline->max_time.wall)
+    srcline->max_time.wall = diff.wall;
 
   /* record the file sample */
-  if (srcfile->depth == 0)
-    srcfile->total_time += diff;
+  if (srcfile->depth == 0) {
+    srcfile->total_time.cpu += diff.cpu;
+    srcfile->total_time.wall += diff.wall;
+  }
 
   /* record into the parent file too */
-  if (caller_frame && caller_frame->srcfile != srcfile)
-    caller_frame->srcfile->child_time += diff;
+  if (caller_frame && caller_frame->srcfile != srcfile) {
+    caller_frame->srcfile->child_time.cpu += diff.cpu;
+    caller_frame->srcfile->child_time.wall += diff.wall;
+  }
 }
 
 static inline sourcefile_t*
@@ -280,7 +321,10 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   rblineprof.cache.srcfile = srcfile;
   if (!srcfile) return; /* skip line profiling for this file */
 
-  prof_time_t now = timeofday_usec();
+  snapshot_t now = {
+    .wall = walltime_usec(),
+    .cpu  = cputime_usec()
+  };
 
   switch (event) {
     case RUBY_EVENT_CALL:
@@ -310,7 +354,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         prev = &rblineprof.stack[rblineprof.stack_depth-2];
 
         if (prev->srcfile != frame->srcfile) {
-          prev->srcfile->exclusive_time += now - prev->srcfile->exclusive_start;
+          prev->srcfile->exclusive_time.cpu += now.cpu - prev->srcfile->exclusive_start.cpu;
+          prev->srcfile->exclusive_time.wall += now.wall - prev->srcfile->exclusive_start.wall;
           prev->srcfile->exclusive_start = now;
         }
       }
@@ -339,7 +384,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         prev = &rblineprof.stack[rblineprof.stack_depth-1];
 
         if (frame->srcfile != prev->srcfile) {
-          frame->srcfile->exclusive_time += now - frame->srcfile->exclusive_start;
+          frame->srcfile->exclusive_time.cpu += now.cpu - frame->srcfile->exclusive_start.cpu;
+          frame->srcfile->exclusive_time.wall += now.wall - frame->srcfile->exclusive_start.wall;
           frame->srcfile->exclusive_start = now;
           prev->srcfile->exclusive_start = now;
         }
@@ -377,9 +423,21 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   VALUE ary = rb_ary_new();
   long i;
 
-  rb_ary_store(ary, 0, rb_ary_new3(3, ULL2NUM(srcfile->total_time), ULL2NUM(srcfile->child_time), ULL2NUM(srcfile->exclusive_time)));
+  rb_ary_store(ary, 0, rb_ary_new3(6,
+    ULL2NUM(srcfile->total_time.wall),
+    ULL2NUM(srcfile->child_time.wall),
+    ULL2NUM(srcfile->exclusive_time.wall),
+    ULL2NUM(srcfile->total_time.cpu),
+    ULL2NUM(srcfile->child_time.cpu),
+    ULL2NUM(srcfile->exclusive_time.cpu)
+  ));
+
   for (i=1; i<srcfile->nlines; i++)
-    rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
+    rb_ary_store(ary, i, rb_ary_new3(3,
+      ULL2NUM(srcfile->lines[i].total_time.wall),
+      ULL2NUM(srcfile->lines[i].total_time.cpu),
+      ULL2NUM(srcfile->lines[i].calls)
+    ));
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;

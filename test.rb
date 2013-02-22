@@ -49,11 +49,11 @@ profile = lineprof(/./) do
 end
 
 File.readlines(file).each_with_index do |line, num|
-  time, calls = profile[file][num+1]
+  wall, cpu, calls = profile[file][num+1]
   if calls && calls > 0
-    printf "% 8.1fms (% 5d) | %s", time/1000.0, calls, line
+    printf "% 8.1fms + % 8.1fms (% 5d) | %s", cpu/1000.0, (wall-cpu)/1000.0, calls, line
   else
-    printf "                   | %s", line
+    printf "                                | %s", line
   end
 end
 
