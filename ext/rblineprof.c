@@ -177,7 +177,12 @@ sourcefile_lookup(char *filename)
       return NULL;
 
     if (!srcfile) { // unknown file, check against regex
-      if (rb_reg_search(rblineprof.source_regex, rb_str_new2(filename), 0, 0) >= 0) {
+      VALUE backref = rb_backref_get();
+      rb_match_busy(backref);
+      long rc = rb_reg_search(rblineprof.source_regex, rb_str_new2(filename), 0, 0);
+      rb_backref_set(backref);
+
+      if (rc >= 0) {
         srcfile = ALLOC_N(sourcefile_t, 1);
         MEMZERO(srcfile, sourcefile_t, 1);
         srcfile->filename = strdup(filename);

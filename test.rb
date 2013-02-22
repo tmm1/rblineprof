@@ -41,11 +41,13 @@ def outer
   inner
 end
 
+file = RUBY_VERSION > '1.9' ? File.expand_path(__FILE__) : __FILE__
+
+# profile = lineprof(file) do
 profile = lineprof(/./) do
   outer
 end
 
-file = RUBY_VERSION > '1.9' ? File.expand_path(__FILE__) : __FILE__
 File.readlines(file).each_with_index do |line, num|
   time, calls = profile[file][num+1]
   if calls && calls > 0
