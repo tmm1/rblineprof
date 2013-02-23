@@ -1,6 +1,7 @@
 #include <ruby.h>
 #include <stdbool.h>
 #include <time.h>
+#include <sys/time.h>
 #include <sys/resource.h>
 
 #ifdef RUBY_VM
@@ -123,19 +124,18 @@ cputime_usec()
 #if defined(__linux__)
   struct timespec ts;
 
-  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0)
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
     return (prof_time_t)ts.tv_sec*1e6 +
            (prof_time_t)ts.tv_nsec*1e-3;
   }
 #endif
 
-#if defined RUSAGE_SELF
+#if defined(RUSAGE_SELF)
   struct rusage usage;
-  struct timeval time;
+
   getrusage(RUSAGE_SELF, &usage);
-  time = usage.ru_utime;
-  return (prof_time_t)time.tv_sec*1e6 +
-         (prof_time_t)time.tv_usec;
+  return (prof_time_t)usage.ru_utime.tv_sec*1e6 +
+         (prof_time_t)usage.ru_utime.tv_usec;
 #endif
 
   return 0;
