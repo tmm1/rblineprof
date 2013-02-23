@@ -1,14 +1,7 @@
 require 'mkmf'
 
 if RUBY_VERSION >= "1.9"
-  begin
-    require "debugger/ruby_core_source"
-  rescue LoadError
-    require 'rubygems/dependency_installer'
-    installer = Gem::DependencyInstaller.new
-    installer.install 'debugger-ruby_core_source'
-    require "debugger/ruby_core_source"
-  end
+  require "debugger/ruby_core_source"
 
   hdrs = proc {
     have_header("vm_core.h") and
