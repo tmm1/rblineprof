@@ -191,24 +191,39 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
   }
 
   snapshot_t diff = snapshot_diff(now, frame->start);
-
-  /* record the line sample */
   sourceline_t *srcline = &(srcfile->lines[line]);
+
+  /* Line profiler metrics.
+   */
+
   srcline->calls++;
-  snapshot_increment(&srcline->total_time, diff);
+
+  /* Increment current line's total_time.
+   *
+   * Skip the special case where the stack frame we're returning to
+   * had the same file/line. This fixes double counting on crazy one-liners.
+   */
+  if (!(caller_frame && caller_frame->srcfile == frame->srcfile && caller_frame->line == frame->line))
+    snapshot_increment(&srcline->total_time, diff);
 
   if (diff.cpu > srcline->max_time.cpu)
     srcline->max_time.cpu = diff.cpu;
   if (diff.wall > srcline->max_time.wall)
     srcline->max_time.wall = diff.wall;
 
-  /* record the file sample */
-  if (srcfile->depth == 0)
-    snapshot_increment(&srcfile->total_time, diff);
+  /* File profiler metrics.
+   */
 
-  /* record into the parent file too */
+  /* Increment the caller file's child_time.
+   */
   if (caller_frame && caller_frame->srcfile != srcfile)
     snapshot_increment(&caller_frame->srcfile->child_time, diff);
+
+  /* Increment current file's total_time, but only when we return
+   * to the outermost stack frame when we first entered the file.
+   */
+  if (srcfile->depth == 0)
+    snapshot_increment(&srcfile->total_time, diff);
 }
 
 static inline sourcefile_t*
@@ -346,11 +361,14 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   switch (event) {
     case RUBY_EVENT_CALL:
     case RUBY_EVENT_C_CALL:
+      /* Create a stack frame entry with this event,
+       * the current file, and a snapshot of metrics.
+       *
+       * On a corresponding RETURN event later, we can
+       * pop this stack frame and accumulate metrics to the
+       * associated file and line.
+       */
       rblineprof.stack_depth++;
-      srcfile->depth++;
-      if (srcfile->depth == 1)
-        srcfile->exclusive_start = now;
-
       if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
@@ -367,9 +385,20 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #endif
       }
 
-      if (rblineprof.stack_depth > 1) {
+      /* Record when we entered this file for the first time.
+       * The difference is later accumulated into exclusive_time,
+       * e.g. on the next event if the file changes.
+       */
+      if (srcfile->depth == 0)
+        srcfile->exclusive_start = now;
+      srcfile->depth++;
+
+      if (rblineprof.stack_depth > 1) { // skip if outermost frame
         prev = &rblineprof.stack[rblineprof.stack_depth-2];
 
+        /* If we just switched files, record time that was spent in
+         * the previous file.
+         */
         if (prev->srcfile != frame->srcfile) {
           snapshot_t diff = snapshot_diff(now, prev->srcfile->exclusive_start);
           snapshot_increment(&prev->srcfile->exclusive_time, diff);
@@ -380,6 +409,11 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 
     case RUBY_EVENT_RETURN:
     case RUBY_EVENT_C_RETURN:
+      /* Find the corresponding CALL for this event.
+       *
+       * We loop here instead of a simple pop, because in the event of a
+       * raise/rescue several stack frames could have disappeared.
+       */
       do {
         if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
           frame = &rblineprof.stack[rblineprof.stack_depth-1];
@@ -393,13 +427,31 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #ifdef RUBY_VM
                frame->thread != th &&
 #endif
+               /* Break when we find a matching CALL/C_CALL.
+                */
+               frame->event != (event == RUBY_EVENT_CALL ? RUBY_EVENT_RETURN : RUBY_EVENT_C_RETURN) &&
                frame->self != self &&
                frame->mid != mid &&
                frame->klass != klass);
 
       if (rblineprof.stack_depth > 0) {
+        // The new top of the stack (that we're returning to)
         prev = &rblineprof.stack[rblineprof.stack_depth-1];
 
+        /* If we're leaving this frame to go back to a different file,
+         * accumulate time we spent in this file.
+         *
+         * Note that we do this both when entering a new file and leaving to
+         * a new file to ensure we only count time spent exclusively in that file.
+         * Consider the following scenario:
+         *
+         *     call (a.rb:1)
+         *       call (b.rb:1)         <-- leaving a.rb, increment into exclusive_time
+         *         call (a.rb:5)
+         *         return              <-- leaving a.rb, increment into exclusive_time
+         *       return
+         *     return
+         */
         if (frame->srcfile != prev->srcfile) {
           snapshot_t diff = snapshot_diff(now, frame->srcfile->exclusive_start);
           snapshot_increment(&frame->srcfile->exclusive_time, diff);
