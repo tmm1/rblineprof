@@ -32,7 +32,24 @@ def inner
 end
 
 def outer
-  sleep 0.001
+  sleep 0.01
+
+  3000.times{ 2**1024 }
+  for i in 1..3000 do 2**1024 end
+
+  for i in 1..3000
+    2**1024
+  end
+
+  (fibonacci = Hash.new{ |h,k| h[k] = k < 2 ?  k : h[k-1] + h[k-2] })[1500]
+
+  (fibonacci = Hash.new{ |h,k|
+    h[k] = k < 2 ?
+      k :
+      h[k-1] +
+      h[k-2]
+  })
+  fibonacci[1500]
 
   100.times do
     inner
@@ -49,11 +66,13 @@ profile = lineprof(/./) do
 end
 
 File.readlines(file).each_with_index do |line, num|
-  time, calls = profile[file][num+1]
+  wall, cpu, calls = profile[file][num+1]
   if calls && calls > 0
-    printf "% 8.1fms (% 5d) | %s", time/1000.0, calls, line
+    printf "% 8.1fms + % 8.1fms (% 5d) | %s", cpu/1000.0, (wall-cpu)/1000.0, calls, line
+    # printf "% 8.1fms (% 5d) | %s", wall/1000.0, calls, line
   else
-    printf "                   | %s", line
+    printf "                                | %s", line
+    # printf "                   | %s", line
   end
 end
 

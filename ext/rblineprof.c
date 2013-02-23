@@ -1,5 +1,8 @@
 #include <ruby.h>
 #include <stdbool.h>
+#include <time.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #ifdef RUBY_VM
   #include <ruby/re.h>
@@ -20,17 +23,28 @@
   typedef rb_event_t rb_event_flag_t;
 #endif
 
-typedef uint64_t prof_time_t;
 static VALUE gc_hook;
 
 /*
- * Struct representing an individual line of
- * Ruby source code
+ * Time in microseconds
+ */
+typedef uint64_t prof_time_t;
+
+/*
+ * Profiling snapshot
+ */
+typedef struct snapshot {
+  prof_time_t wall;
+  prof_time_t cpu;
+} snapshot_t;
+
+/*
+ * A line of Ruby source code
  */
 typedef struct sourceline {
-  uint64_t calls; // total number of calls
-  prof_time_t total_time;
-  prof_time_t max_time;
+  uint64_t calls; // total number of call/c_call events
+  snapshot_t total_time;
+  snapshot_t max_time;
 } sourceline_t;
 
 /*
@@ -44,11 +58,11 @@ typedef struct sourcefile {
   sourceline_t *lines;
 
   /* overall file timing */
-  prof_time_t total_time;
-  prof_time_t child_time;
+  snapshot_t total_time;
+  snapshot_t child_time;
   uint64_t depth;
-  prof_time_t exclusive_start;
-  prof_time_t exclusive_time;
+  snapshot_t exclusive_start;
+  snapshot_t exclusive_time;
 } sourcefile_t;
 
 /*
@@ -70,7 +84,7 @@ typedef struct stackframe {
   char *filename;
   long line;
 
-  prof_time_t start;
+  snapshot_t start;
   sourcefile_t *srcfile;
 } stackframe_t;
 
@@ -105,7 +119,30 @@ rblineprof = {
 };
 
 static prof_time_t
-timeofday_usec()
+cputime_usec()
+{
+#if defined(__linux__)
+  struct timespec ts;
+
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
+    return (prof_time_t)ts.tv_sec*1e6 +
+           (prof_time_t)ts.tv_nsec*1e-3;
+  }
+#endif
+
+#if defined(RUSAGE_SELF)
+  struct rusage usage;
+
+  getrusage(RUSAGE_SELF, &usage);
+  return (prof_time_t)usage.ru_utime.tv_sec*1e6 +
+         (prof_time_t)usage.ru_utime.tv_usec;
+#endif
+
+  return 0;
+}
+
+static prof_time_t
+walltime_usec()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -113,8 +150,26 @@ timeofday_usec()
          (prof_time_t)tv.tv_usec;
 }
 
+static inline snapshot_t
+snapshot_diff(snapshot_t *t1, snapshot_t *t2)
+{
+  snapshot_t diff = {
+    .wall = t1->wall - t2->wall,
+    .cpu  = t1->cpu  - t2->cpu
+  };
+
+  return diff;
+}
+
 static inline void
-stackframe_record(stackframe_t *frame, prof_time_t now, stackframe_t *caller_frame)
+snapshot_increment(snapshot_t *s, snapshot_t *inc)
+{
+  s->wall += inc->wall;
+  s->cpu  += inc->cpu;
+}
+
+static inline void
+stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_frame)
 {
   sourcefile_t *srcfile = frame->srcfile;
   long line = frame->line;
@@ -135,22 +190,40 @@ stackframe_record(stackframe_t *frame, prof_time_t now, stackframe_t *caller_fra
     MEMZERO(srcfile->lines + prev_nlines, sourceline_t, srcfile->nlines - prev_nlines);
   }
 
-  prof_time_t diff = now - frame->start;
-
-  /* record the line sample */
+  snapshot_t diff = snapshot_diff(&now, &frame->start);
   sourceline_t *srcline = &(srcfile->lines[line]);
+
+  /* Line profiler metrics.
+   */
+
   srcline->calls++;
-  srcline->total_time += diff;
-  if (diff > srcline->max_time)
-    srcline->max_time = diff;
 
-  /* record the file sample */
-  if (srcfile->depth == 0)
-    srcfile->total_time += diff;
+  /* Increment current line's total_time.
+   *
+   * Skip the special case where the stack frame we're returning to
+   * had the same file/line. This fixes double counting on crazy one-liners.
+   */
+  if (!(caller_frame && caller_frame->srcfile == frame->srcfile && caller_frame->line == frame->line))
+    snapshot_increment(&srcline->total_time, &diff);
 
-  /* record into the parent file too */
+  if (diff.cpu > srcline->max_time.cpu)
+    srcline->max_time.cpu = diff.cpu;
+  if (diff.wall > srcline->max_time.wall)
+    srcline->max_time.wall = diff.wall;
+
+  /* File profiler metrics.
+   */
+
+  /* Increment the caller file's child_time.
+   */
   if (caller_frame && caller_frame->srcfile != srcfile)
-    caller_frame->srcfile->child_time += diff;
+    snapshot_increment(&caller_frame->srcfile->child_time, &diff);
+
+  /* Increment current file's total_time, but only when we return
+   * to the outermost stack frame when we first entered the file.
+   */
+  if (srcfile->depth == 0)
+    snapshot_increment(&srcfile->total_time, &diff);
 }
 
 static inline sourcefile_t*
@@ -280,16 +353,22 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   rblineprof.cache.srcfile = srcfile;
   if (!srcfile) return; /* skip line profiling for this file */
 
-  prof_time_t now = timeofday_usec();
+  snapshot_t now = {
+    .wall = walltime_usec(),
+    .cpu  = cputime_usec()
+  };
 
   switch (event) {
     case RUBY_EVENT_CALL:
     case RUBY_EVENT_C_CALL:
+      /* Create a stack frame entry with this event,
+       * the current file, and a snapshot of metrics.
+       *
+       * On a corresponding RETURN event later, we can
+       * pop this stack frame and accumulate metrics to the
+       * associated file and line.
+       */
       rblineprof.stack_depth++;
-      srcfile->depth++;
-      if (srcfile->depth == 1)
-        srcfile->exclusive_start = now;
-
       if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
         frame = &rblineprof.stack[rblineprof.stack_depth-1];
         frame->event = event;
@@ -306,11 +385,23 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #endif
       }
 
-      if (rblineprof.stack_depth > 1) {
+      /* Record when we entered this file for the first time.
+       * The difference is later accumulated into exclusive_time,
+       * e.g. on the next event if the file changes.
+       */
+      if (srcfile->depth == 0)
+        srcfile->exclusive_start = now;
+      srcfile->depth++;
+
+      if (rblineprof.stack_depth > 1) { // skip if outermost frame
         prev = &rblineprof.stack[rblineprof.stack_depth-2];
 
+        /* If we just switched files, record time that was spent in
+         * the previous file.
+         */
         if (prev->srcfile != frame->srcfile) {
-          prev->srcfile->exclusive_time += now - prev->srcfile->exclusive_start;
+          snapshot_t diff = snapshot_diff(&now, &prev->srcfile->exclusive_start);
+          snapshot_increment(&prev->srcfile->exclusive_time, &diff);
           prev->srcfile->exclusive_start = now;
         }
       }
@@ -318,6 +409,11 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 
     case RUBY_EVENT_RETURN:
     case RUBY_EVENT_C_RETURN:
+      /* Find the corresponding CALL for this event.
+       *
+       * We loop here instead of a simple pop, because in the event of a
+       * raise/rescue several stack frames could have disappeared.
+       */
       do {
         if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
           frame = &rblineprof.stack[rblineprof.stack_depth-1];
@@ -331,15 +427,34 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #ifdef RUBY_VM
                frame->thread != th &&
 #endif
+               /* Break when we find a matching CALL/C_CALL.
+                */
+               frame->event != (event == RUBY_EVENT_CALL ? RUBY_EVENT_RETURN : RUBY_EVENT_C_RETURN) &&
                frame->self != self &&
                frame->mid != mid &&
                frame->klass != klass);
 
       if (rblineprof.stack_depth > 0) {
+        // The new top of the stack (that we're returning to)
         prev = &rblineprof.stack[rblineprof.stack_depth-1];
 
+        /* If we're leaving this frame to go back to a different file,
+         * accumulate time we spent in this file.
+         *
+         * Note that we do this both when entering a new file and leaving to
+         * a new file to ensure we only count time spent exclusively in that file.
+         * Consider the following scenario:
+         *
+         *     call (a.rb:1)
+         *       call (b.rb:1)         <-- leaving a.rb, increment into exclusive_time
+         *         call (a.rb:5)
+         *         return              <-- leaving a.rb, increment into exclusive_time
+         *       return
+         *     return
+         */
         if (frame->srcfile != prev->srcfile) {
-          frame->srcfile->exclusive_time += now - frame->srcfile->exclusive_start;
+          snapshot_t diff = snapshot_diff(&now, &frame->srcfile->exclusive_start);
+          snapshot_increment(&frame->srcfile->exclusive_time, &diff);
           frame->srcfile->exclusive_start = now;
           prev->srcfile->exclusive_start = now;
         }
@@ -377,9 +492,21 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   VALUE ary = rb_ary_new();
   long i;
 
-  rb_ary_store(ary, 0, rb_ary_new3(3, ULL2NUM(srcfile->total_time), ULL2NUM(srcfile->child_time), ULL2NUM(srcfile->exclusive_time)));
+  rb_ary_store(ary, 0, rb_ary_new3(6,
+    ULL2NUM(srcfile->total_time.wall),
+    ULL2NUM(srcfile->child_time.wall),
+    ULL2NUM(srcfile->exclusive_time.wall),
+    ULL2NUM(srcfile->total_time.cpu),
+    ULL2NUM(srcfile->child_time.cpu),
+    ULL2NUM(srcfile->exclusive_time.cpu)
+  ));
+
   for (i=1; i<srcfile->nlines; i++)
-    rb_ary_store(ary, i, rb_ary_new3(2, ULL2NUM(srcfile->lines[i].total_time), ULL2NUM(srcfile->lines[i].calls)));
+    rb_ary_store(ary, i, rb_ary_new3(3,
+      ULL2NUM(srcfile->lines[i].total_time.wall),
+      ULL2NUM(srcfile->lines[i].total_time.cpu),
+      ULL2NUM(srcfile->lines[i].calls)
+    ));
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
   return ST_CONTINUE;
