@@ -44,7 +44,6 @@ typedef struct snapshot {
 typedef struct sourceline {
   uint64_t calls; // total number of call/c_call events
   snapshot_t total_time;
-  snapshot_t max_time;
 } sourceline_t;
 
 /*
@@ -205,11 +204,6 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
    */
   if (!(caller_frame && caller_frame->srcfile == frame->srcfile && caller_frame->line == frame->line))
     snapshot_increment(&srcline->total_time, &diff);
-
-  if (diff.cpu > srcline->max_time.cpu)
-    srcline->max_time.cpu = diff.cpu;
-  if (diff.wall > srcline->max_time.wall)
-    srcline->max_time.wall = diff.wall;
 
   /* File profiler metrics.
    */
