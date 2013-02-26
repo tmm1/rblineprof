@@ -34,8 +34,8 @@ typedef uint64_t prof_time_t;
  * Profiling snapshot
  */
 typedef struct snapshot {
-  prof_time_t wall;
-  prof_time_t cpu;
+  prof_time_t wall_time;
+  prof_time_t cpu_time;
 } snapshot_t;
 
 /*
@@ -43,7 +43,7 @@ typedef struct snapshot {
  */
 typedef struct sourceline {
   uint64_t calls; // total number of call/c_call events
-  snapshot_t total_time;
+  snapshot_t total;
 } sourceline_t;
 
 /*
@@ -57,11 +57,11 @@ typedef struct sourcefile {
   sourceline_t *lines;
 
   /* overall file timing */
-  snapshot_t total_time;
-  snapshot_t child_time;
+  snapshot_t total;
+  snapshot_t child;
   uint64_t depth;
   snapshot_t exclusive_start;
-  snapshot_t exclusive_time;
+  snapshot_t exclusive;
 } sourcefile_t;
 
 /*
@@ -153,8 +153,8 @@ static inline snapshot_t
 snapshot_diff(snapshot_t *t1, snapshot_t *t2)
 {
   snapshot_t diff = {
-    .wall = t1->wall - t2->wall,
-    .cpu  = t1->cpu  - t2->cpu
+    .wall_time         = t1->wall_time - t2->wall_time,
+    .cpu_time          = t1->cpu_time  - t2->cpu_time,
   };
 
   return diff;
@@ -163,8 +163,8 @@ snapshot_diff(snapshot_t *t1, snapshot_t *t2)
 static inline void
 snapshot_increment(snapshot_t *s, snapshot_t *inc)
 {
-  s->wall += inc->wall;
-  s->cpu  += inc->cpu;
+  s->wall_time         += inc->wall_time;
+  s->cpu_time          += inc->cpu_time;
 }
 
 static inline void
@@ -203,7 +203,7 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
    * had the same file/line. This fixes double counting on crazy one-liners.
    */
   if (!(caller_frame && caller_frame->srcfile == frame->srcfile && caller_frame->line == frame->line))
-    snapshot_increment(&srcline->total_time, &diff);
+    snapshot_increment(&srcline->total, &diff);
 
   /* File profiler metrics.
    */
@@ -211,13 +211,13 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
   /* Increment the caller file's child_time.
    */
   if (caller_frame && caller_frame->srcfile != srcfile)
-    snapshot_increment(&caller_frame->srcfile->child_time, &diff);
+    snapshot_increment(&caller_frame->srcfile->child, &diff);
 
   /* Increment current file's total_time, but only when we return
    * to the outermost stack frame when we first entered the file.
    */
   if (srcfile->depth == 0)
-    snapshot_increment(&srcfile->total_time, &diff);
+    snapshot_increment(&srcfile->total, &diff);
 }
 
 static inline sourcefile_t*
@@ -348,8 +348,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   if (!srcfile) return; /* skip line profiling for this file */
 
   snapshot_t now = {
-    .wall = walltime_usec(),
-    .cpu  = cputime_usec()
+    .wall_time         = walltime_usec(),
+    .cpu_time          = cputime_usec(),
   };
 
   switch (event) {
@@ -395,7 +395,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
          */
         if (prev->srcfile != frame->srcfile) {
           snapshot_t diff = snapshot_diff(&now, &prev->srcfile->exclusive_start);
-          snapshot_increment(&prev->srcfile->exclusive_time, &diff);
+          snapshot_increment(&prev->srcfile->exclusive, &diff);
           prev->srcfile->exclusive_start = now;
         }
       }
@@ -448,7 +448,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
          */
         if (frame->srcfile != prev->srcfile) {
           snapshot_t diff = snapshot_diff(&now, &frame->srcfile->exclusive_start);
-          snapshot_increment(&frame->srcfile->exclusive_time, &diff);
+          snapshot_increment(&frame->srcfile->exclusive, &diff);
           frame->srcfile->exclusive_start = now;
           prev->srcfile->exclusive_start = now;
         }
@@ -487,18 +487,18 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   long i;
 
   rb_ary_store(ary, 0, rb_ary_new3(6,
-    ULL2NUM(srcfile->total_time.wall),
-    ULL2NUM(srcfile->child_time.wall),
-    ULL2NUM(srcfile->exclusive_time.wall),
-    ULL2NUM(srcfile->total_time.cpu),
-    ULL2NUM(srcfile->child_time.cpu),
-    ULL2NUM(srcfile->exclusive_time.cpu)
+    ULL2NUM(srcfile->total.wall_time),
+    ULL2NUM(srcfile->child.wall_time),
+    ULL2NUM(srcfile->exclusive.wall_time),
+    ULL2NUM(srcfile->total.cpu_time),
+    ULL2NUM(srcfile->child.cpu_time),
+    ULL2NUM(srcfile->exclusive.cpu_time)
   ));
 
   for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, rb_ary_new3(3,
-      ULL2NUM(srcfile->lines[i].total_time.wall),
-      ULL2NUM(srcfile->lines[i].total_time.cpu),
+      ULL2NUM(srcfile->lines[i].total.wall_time),
+      ULL2NUM(srcfile->lines[i].total.cpu_time),
       ULL2NUM(srcfile->lines[i].calls)
     ));
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
