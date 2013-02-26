@@ -10,6 +10,34 @@ class Obj
     sleep 0.001
   end
 
+  def out=(*)
+  end
+
+  def with_defaults(arg=self.object_id.to_s)
+    another
+    list = [1,2,3]
+    # for cookie in list
+    #   self.out=(
+        dummy(
+          1, "str
+          ing")
+        dummy <<-EOS
+          hi
+        EOS
+        dummy \
+          1234
+        dummy :a => 'b',
+          :c => 'd',
+          :e => 1024**1024,
+          'something' => dummy(:ok)
+    #   )
+    # end
+  end
+
+  def dummy(*args)
+    args.inspect
+  end
+
   class_eval <<-RUBY, 'otherfile.rb', 1
     def other_file
       another
@@ -29,6 +57,7 @@ def inner
   o.inner_block
   o.another
   o.other_file
+  o.with_defaults
 end
 
 def outer
@@ -41,7 +70,7 @@ def outer
     2**1024
   end
 
-  (fibonacci = Hash.new{ |h,k| h[k] = k < 2 ?  k : h[k-1] + h[k-2] })[1500]
+  (fibonacci = Hash.new{ |h,k| h[k] = k < 2 ?  k : h[k-1] + h[k-2] })[500]
 
   (fibonacci = Hash.new{ |h,k|
     h[k] = k < 2 ?
@@ -49,7 +78,7 @@ def outer
       h[k-1] +
       h[k-2]
   })
-  fibonacci[1500]
+  fibonacci[500]
 
   100.times do
     inner
