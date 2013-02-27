@@ -290,6 +290,26 @@ rb_vm_get_caller(rb_thread_t *th, rb_control_frame_t *cfp, ID mid)
 
   return 0;
 }
+
+#ifdef HAVE_TYPE_RB_ISEQ_LOCATION_T
+inline static int
+calc_lineno(const rb_iseq_t *iseq, const VALUE *pc)
+{
+  return rb_iseq_line_no(iseq, pc - iseq->iseq_encoded);
+}
+
+int
+rb_vm_get_sourceline(const rb_control_frame_t *cfp)
+{
+  int lineno = 0;
+  const rb_iseq_t *iseq = cfp->iseq;
+
+  if (RUBY_VM_NORMAL_ISEQ_P(iseq)) {
+    lineno = calc_lineno(cfp->iseq, cfp->pc);
+  }
+  return lineno;
+}
+#endif
 #endif
 
 static void
@@ -317,14 +337,21 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   file = caller_node->nd_file;
   line = nd_line(caller_node);
 #else
-  rb_thread_t *th = GET_THREAD();
+  rb_thread_t *th = ruby_current_thread;
   rb_control_frame_t *cfp = rb_vm_get_caller(th, th->cfp, mid);
   if (!cfp) return;
 
-  if (RTEST(cfp->iseq->filepath))
-    file = StringValueCStr(cfp->iseq->filepath);
-  else
-    file = StringValueCStr(cfp->iseq->filename);
+  #ifdef HAVE_TYPE_RB_ISEQ_LOCATION_T
+    if (RTEST(cfp->iseq->location.absolute_path))
+      file = StringValueCStr(cfp->iseq->location.absolute_path);
+    else
+      file = StringValueCStr(cfp->iseq->location.path);
+  #else
+    if (RTEST(cfp->iseq->filepath))
+      file = StringValueCStr(cfp->iseq->filepath);
+    else
+      file = StringValueCStr(cfp->iseq->filename);
+  #endif
   line = rb_vm_get_sourceline(cfp);
 #endif
 
