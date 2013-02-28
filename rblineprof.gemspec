@@ -12,5 +12,5 @@ Gem::Specification.new do |s|
   s.summary = 'line-profiler for ruby'
   s.description = 'rblineprof shows you lines of code that are slow.'
 
-  s.add_dependency 'debugger-ruby_core_source', '~> 1.1.8'
+  s.add_dependency 'debugger-ruby_core_source', '~> 1.2'
 end
