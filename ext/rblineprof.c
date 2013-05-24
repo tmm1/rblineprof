@@ -455,34 +455,35 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
                frame->mid != mid &&
                frame->klass != klass);
 
-      if (rblineprof.stack_depth > 0) {
-        // The new top of the stack (that we're returning to)
-        prev = &rblineprof.stack[rblineprof.stack_depth-1];
+      if (frame) {
+        if (rblineprof.stack_depth > 0) {
+          // The new top of the stack (that we're returning to)
+          prev = &rblineprof.stack[rblineprof.stack_depth-1];
 
-        /* If we're leaving this frame to go back to a different file,
-         * accumulate time we spent in this file.
-         *
-         * Note that we do this both when entering a new file and leaving to
-         * a new file to ensure we only count time spent exclusively in that file.
-         * Consider the following scenario:
-         *
-         *     call (a.rb:1)
-         *       call (b.rb:1)         <-- leaving a.rb, increment into exclusive_time
-         *         call (a.rb:5)
-         *         return              <-- leaving a.rb, increment into exclusive_time
-         *       return
-         *     return
-         */
-        if (frame->srcfile != prev->srcfile) {
-          snapshot_t diff = snapshot_diff(&now, &frame->srcfile->exclusive_start);
-          snapshot_increment(&frame->srcfile->exclusive, &diff);
-          frame->srcfile->exclusive_start = now;
-          prev->srcfile->exclusive_start = now;
+          /* If we're leaving this frame to go back to a different file,
+           * accumulate time we spent in this file.
+           *
+           * Note that we do this both when entering a new file and leaving to
+           * a new file to ensure we only count time spent exclusively in that file.
+           * Consider the following scenario:
+           *
+           *     call (a.rb:1)
+           *       call (b.rb:1)         <-- leaving a.rb, increment into exclusive_time
+           *         call (a.rb:5)
+           *         return              <-- leaving a.rb, increment into exclusive_time
+           *       return
+           *     return
+           */
+          if (frame->srcfile != prev->srcfile) {
+            snapshot_t diff = snapshot_diff(&now, &frame->srcfile->exclusive_start);
+            snapshot_increment(&frame->srcfile->exclusive, &diff);
+            frame->srcfile->exclusive_start = now;
+            prev->srcfile->exclusive_start = now;
+          }
         }
-      }
 
-      if (frame)
         stackframe_record(frame, now, prev);
+      }
 
       break;
   }
