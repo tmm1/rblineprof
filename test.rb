@@ -85,6 +85,12 @@ def outer
   end
 
   inner
+
+  (0..10).map do |i|
+    Thread.new(i) do
+      inner
+    end
+  end.each(&:join)
 end
 
 file = RUBY_VERSION > '1.9' ? File.expand_path(__FILE__) : __FILE__
