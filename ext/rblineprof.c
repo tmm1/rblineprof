@@ -440,9 +440,11 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
           frame = &rblineprof.stack[rblineprof.stack_depth-1];
           if (frame->srcfile->depth > 0)
             frame->srcfile->depth--;
-          rblineprof.stack_depth--;
         } else
           frame = NULL;
+
+        if (rblineprof.stack_depth > 0)
+          rblineprof.stack_depth--;
       } while (frame &&
 #ifdef RUBY_VM
                frame->thread != th &&
