@@ -1,5 +1,7 @@
 require 'mkmf'
 
+have_func('rb_os_allocated_objects')
+
 if RUBY_VERSION >= "1.9"
   require "debugger/ruby_core_source"
 

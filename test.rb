@@ -98,10 +98,27 @@ file = RUBY_VERSION > '1.9' ? File.expand_path(__FILE__) : __FILE__
 # profile = lineprof(file) do
 profile = lineprof(/./) do
   outer
+
+  100.times{ 1 }
+  100.times{ 1 + 1 }
+  100.times{ 1.1 }
+  100.times{ 1.1 + 1 }
+  100.times{ 1.1 + 1.1 }
+  100.times{ "str" }
+  ('a'..'z').to_a
 end
 
 File.readlines(file).each_with_index do |line, num|
-  wall, cpu, calls = profile[file][num+1]
+  wall, cpu, calls, allocations = profile[file][num+1]
+
+  if allocations > 0
+    printf "% 10d objs | %s", allocations, line
+  else
+    printf "                | %s", line
+  end
+
+  next
+
   if calls && calls > 0
     printf "% 8.1fms + % 8.1fms (% 5d) | %s", cpu/1000.0, (wall-cpu)/1000.0, calls, line
     # printf "% 8.1fms (% 5d) | %s", wall/1000.0, calls, line
@@ -113,7 +130,7 @@ end
 
 puts
 profile.each do |file, data|
-  total, child, exclusive = data[0]
+  total, child, exclusive, allocations = data[0]
   puts file
   printf "  % 10.1fms in this file\n", exclusive/1000.0
   printf "  % 10.1fms in this file + children\n", total/1000.0
