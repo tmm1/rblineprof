@@ -23,6 +23,10 @@
   typedef rb_event_t rb_event_flag_t;
 #endif
 
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) && defined(RUBY_VM)
+size_t rb_os_allocated_objects(void);
+#endif
+
 static VALUE gc_hook;
 
 /*
@@ -36,6 +40,9 @@ typedef uint64_t prof_time_t;
 typedef struct snapshot {
   prof_time_t wall_time;
   prof_time_t cpu_time;
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+  size_t allocated_objects;
+#endif
 } snapshot_t;
 
 /*
@@ -155,6 +162,9 @@ snapshot_diff(snapshot_t *t1, snapshot_t *t2)
   snapshot_t diff = {
     .wall_time         = t1->wall_time - t2->wall_time,
     .cpu_time          = t1->cpu_time  - t2->cpu_time,
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+    .allocated_objects = t1->allocated_objects - t2->allocated_objects
+#endif
   };
 
   return diff;
@@ -165,6 +175,9 @@ snapshot_increment(snapshot_t *s, snapshot_t *inc)
 {
   s->wall_time         += inc->wall_time;
   s->cpu_time          += inc->cpu_time;
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+  s->allocated_objects += inc->allocated_objects;
+#endif
 }
 
 static inline void
@@ -377,6 +390,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   snapshot_t now = {
     .wall_time         = walltime_usec(),
     .cpu_time          = cputime_usec(),
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+    .allocated_objects = rb_os_allocated_objects()
+#endif
   };
 
   switch (event) {
@@ -514,20 +530,36 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   VALUE ary = rb_ary_new();
   long i;
 
-  rb_ary_store(ary, 0, rb_ary_new3(6,
+  rb_ary_store(ary, 0, rb_ary_new3(
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+    7,
+#else
+    6,
+#endif
     ULL2NUM(srcfile->total.wall_time),
     ULL2NUM(srcfile->child.wall_time),
     ULL2NUM(srcfile->exclusive.wall_time),
     ULL2NUM(srcfile->total.cpu_time),
     ULL2NUM(srcfile->child.cpu_time),
     ULL2NUM(srcfile->exclusive.cpu_time)
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+    , ULL2NUM(srcfile->total.allocated_objects)
+#endif
   ));
 
   for (i=1; i<srcfile->nlines; i++)
-    rb_ary_store(ary, i, rb_ary_new3(3,
+    rb_ary_store(ary, i, rb_ary_new3(
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+      4,
+#else
+      3,
+#endif
       ULL2NUM(srcfile->lines[i].total.wall_time),
       ULL2NUM(srcfile->lines[i].total.cpu_time),
       ULL2NUM(srcfile->lines[i].calls)
+#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+      , ULL2NUM(srcfile->lines[i].total.allocated_objects)
+#endif
     ));
   rb_hash_aset(ret, rb_str_new2(srcfile->filename), ary);
 
