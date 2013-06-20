@@ -1,3 +1,4 @@
+$:.unshift 'ext'
 require 'rblineprof'
 
 $line_times = Hash.new(0.0)
