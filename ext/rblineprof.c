@@ -94,12 +94,17 @@ typedef struct stackframe {
   sourcefile_t *srcfile;
 } stackframe_t;
 
-typedef struct stackinfo {
+typedef struct stackinfo stackinfo_t;
+struct stackinfo {
   // stack
   #define MAX_STACK_DEPTH 32768
   stackframe_t stack[MAX_STACK_DEPTH];
   uint64_t stack_depth;
-} stackinfo_t;
+#ifdef RUBY_VM
+  rb_thread_t *thread;
+  stackinfo_t *next;
+#endif
+};
 
 /*
  * Static properties and rbineprof configuration
@@ -401,6 +406,16 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 
   stackinfo_t *current_stack;
   current_stack = &rblineprof.stackinfo;
+#ifdef RUBY_VM
+  while (current_stack->thread != NULL && current_stack->thread != th) {
+    if (current_stack->next == NULL) {
+      current_stack->next = ALLOC_N(stackinfo_t, 1);
+      MEMZERO(current_stack->next, stackinfo_t, 1);
+    }
+    current_stack = current_stack->next;
+  }
+  current_stack->thread = th;
+#endif
 
   switch (event) {
     case RUBY_EVENT_CALL:
@@ -512,6 +527,15 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   }
 }
 
+static void
+cleanup_stack(stackinfo_t *stackinfo)
+{
+  if (stackinfo != NULL) {
+    cleanup_stack(stackinfo->next);
+    xfree(stackinfo);
+  }
+}
+
 static int
 cleanup_files(st_data_t key, st_data_t record, st_data_t arg)
 {
@@ -618,6 +642,7 @@ lineprof(VALUE self, VALUE filename)
   rblineprof.cache.file = NULL;
   rblineprof.cache.srcfile = NULL;
   rblineprof.stackinfo.stack_depth = 0;
+  cleanup_stack(rblineprof.stackinfo.next);
 
   rblineprof.enabled = true;
 #ifndef RUBY_VM
