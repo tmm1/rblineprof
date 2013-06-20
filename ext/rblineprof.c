@@ -102,6 +102,7 @@ struct stackinfo {
   uint64_t stack_depth;
   stackinfo_t *next;
 #ifdef RUBY_VM
+  snapshot_t last_snapshot;
   rb_thread_t *thread;
 #endif
 };
@@ -113,6 +114,10 @@ static struct {
   bool enabled;
 
   stackinfo_t stackinfo;
+#ifdef RUBY_VM
+  snapshot_t last_snapshot;
+  rb_thread_t *last_thread;
+#endif
 
   // single file mode, store filename and line data directly
   char *source_filename;
@@ -190,7 +195,7 @@ snapshot_increment(snapshot_t *s, snapshot_t *inc)
 }
 
 static inline void
-stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_frame)
+stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_frame, snapshot_t offset)
 {
   sourcefile_t *srcfile = frame->srcfile;
   long line = frame->line;
@@ -212,6 +217,7 @@ stackframe_record(stackframe_t *frame, snapshot_t now, stackframe_t *caller_fram
   }
 
   snapshot_t diff = snapshot_diff(&now, &frame->start);
+  diff = snapshot_diff(&diff, &offset);
   sourceline_t *srcline = &(srcfile->lines[line]);
 
   /* Line profiler metrics.
@@ -519,11 +525,23 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         }
       }
 
+      snapshot_t offset = {0};
+#ifdef RUBY_VM
+      if (th != rblineprof.last_thread) {
+        offset = snapshot_diff(&rblineprof.last_snapshot, &current_stack->last_snapshot);
+      }
+#endif
       if (frame)
-        stackframe_record(frame, now, prev);
+        stackframe_record(frame, now, prev, offset);
 
       break;
   }
+
+#ifdef RUBY_VM
+  current_stack->last_snapshot = now;
+  rblineprof.last_snapshot = now;
+  rblineprof.last_thread = th;
+#endif
 }
 
 static void
