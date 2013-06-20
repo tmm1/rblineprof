@@ -25,7 +25,7 @@ def main
 end
 
 def getprofile
-  lineprof(File.expand_path(__FILE__)) do
+  lineprof(/threadtest/) do
     log(__LINE__) do
       t = Thread.new do
         log(__LINE__) do
