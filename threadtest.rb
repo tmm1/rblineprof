@@ -34,8 +34,8 @@ def main_work
 end
 
 def work(n)
-  sleep 0.01
-  n.times { 2**1024 }
+  log('sleep') { sleep 0.01          }
+  log('math')  { n.times { 2**1024 } }
 end
 
 def log(label)
