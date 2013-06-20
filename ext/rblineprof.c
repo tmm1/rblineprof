@@ -529,6 +529,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #ifdef RUBY_VM
       if (th != rblineprof.last_thread) {
         offset = snapshot_diff(&rblineprof.last_snapshot, &current_stack->last_snapshot);
+        offset.wall_time = 0; // Wall time really happens, but CPU and allocations are on another thread.
       }
 #endif
       if (frame)
