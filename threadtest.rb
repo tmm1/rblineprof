@@ -3,8 +3,7 @@ require 'rblineprof'
 $line_times = Hash.new(0.0)
 
 def main
-  profile = log(__LINE__) { getprofile }
-  profile = profile.values.first
+  profile = getprofile().values.first
   File.readlines(__FILE__).each_with_index do |content, i|
     lineno = i + 1
     line_time =
@@ -26,16 +25,18 @@ end
 
 def getprofile
   lineprof(File.expand_path(__FILE__)) do
-    t = Thread.new do
-      log(__LINE__) do
-        thread_work
+    log(__LINE__) do
+      t = Thread.new do
+        log(__LINE__) do
+          thread_work
+        end
       end
-    end
-    log(__LINE__) do
-      main_work
-    end
-    log(__LINE__) do
-      t.join
+      log(__LINE__) do
+        main_work
+      end
+      log(__LINE__) do
+        t.join
+      end
     end
   end
 end
