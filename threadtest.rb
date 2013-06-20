@@ -8,9 +8,9 @@ def main
     lineno = i + 1
     line_time =
       if $line_times.has_key?(lineno)
-        sprintf('%6.3fms', $line_times[lineno] * 1000.0)
+        sprintf('%6.3fms vs', $line_times[lineno] * 1000.0)
       else
-        (' '*8)
+        (' '*11)
       end
     prof_time =
       if profile[lineno] && profile[lineno].any? { |x| x > 0 }
@@ -19,7 +19,7 @@ def main
       else
         ' '*23
       end
-    puts "#{line_time} vs #{prof_time} | #{'%2d' % lineno} | #{content}"
+    puts "#{line_time} #{prof_time} | #{'%2d' % lineno} | #{content}"
   end
 end
 
