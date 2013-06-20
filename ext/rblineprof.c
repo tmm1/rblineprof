@@ -94,16 +94,20 @@ typedef struct stackframe {
   sourcefile_t *srcfile;
 } stackframe_t;
 
+typedef struct stackinfo {
+  // stack
+  #define MAX_STACK_DEPTH 32768
+  stackframe_t stack[MAX_STACK_DEPTH];
+  uint64_t stack_depth;
+} stackinfo_t;
+
 /*
  * Static properties and rbineprof configuration
  */
 static struct {
   bool enabled;
 
-  // stack
-  #define MAX_STACK_DEPTH 32768
-  stackframe_t stack[MAX_STACK_DEPTH];
-  uint64_t stack_depth;
+  stackinfo_t stackinfo;
 
   // single file mode, store filename and line data directly
   char *source_filename;
@@ -395,6 +399,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #endif
   };
 
+  stackinfo_t *current_stack;
+  current_stack = &rblineprof.stackinfo;
+
   switch (event) {
     case RUBY_EVENT_CALL:
     case RUBY_EVENT_C_CALL:
@@ -405,9 +412,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
        * pop this stack frame and accumulate metrics to the
        * associated file and line.
        */
-      rblineprof.stack_depth++;
-      if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
-        frame = &rblineprof.stack[rblineprof.stack_depth-1];
+      current_stack->stack_depth++;
+      if (current_stack->stack_depth > 0 && current_stack->stack_depth < MAX_STACK_DEPTH) {
+        frame = &current_stack->stack[current_stack->stack_depth-1];
         frame->event = event;
         frame->self = self;
         frame->mid = mid;
@@ -430,8 +437,8 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         srcfile->exclusive_start = now;
       srcfile->depth++;
 
-      if (rblineprof.stack_depth > 1) { // skip if outermost frame
-        prev = &rblineprof.stack[rblineprof.stack_depth-2];
+      if (current_stack->stack_depth > 1) { // skip if outermost frame
+        prev = &current_stack->stack[current_stack->stack_depth-2];
 
         /* If we just switched files, record time that was spent in
          * the previous file.
@@ -452,15 +459,15 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
        * raise/rescue several stack frames could have disappeared.
        */
       do {
-        if (rblineprof.stack_depth > 0 && rblineprof.stack_depth < MAX_STACK_DEPTH) {
-          frame = &rblineprof.stack[rblineprof.stack_depth-1];
+        if (current_stack->stack_depth > 0 && current_stack->stack_depth < MAX_STACK_DEPTH) {
+          frame = &current_stack->stack[current_stack->stack_depth-1];
           if (frame->srcfile->depth > 0)
             frame->srcfile->depth--;
         } else
           frame = NULL;
 
-        if (rblineprof.stack_depth > 0)
-          rblineprof.stack_depth--;
+        if (current_stack->stack_depth > 0)
+          current_stack->stack_depth--;
       } while (frame &&
 #ifdef RUBY_VM
                frame->thread != th &&
@@ -472,9 +479,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
                frame->mid != mid &&
                frame->klass != klass);
 
-      if (rblineprof.stack_depth > 0) {
+      if (current_stack->stack_depth > 0) {
         // The new top of the stack (that we're returning to)
-        prev = &rblineprof.stack[rblineprof.stack_depth-1];
+        prev = &current_stack->stack[current_stack->stack_depth-1];
 
         /* If we're leaving this frame to go back to a different file,
          * accumulate time we spent in this file.
@@ -610,6 +617,7 @@ lineprof(VALUE self, VALUE filename)
   }
   rblineprof.cache.file = NULL;
   rblineprof.cache.srcfile = NULL;
+  rblineprof.stackinfo.stack_depth = 0;
 
   rblineprof.enabled = true;
 #ifndef RUBY_VM
