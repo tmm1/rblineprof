@@ -100,9 +100,9 @@ struct stackinfo {
   #define MAX_STACK_DEPTH 32768
   stackframe_t stack[MAX_STACK_DEPTH];
   uint64_t stack_depth;
+  stackinfo_t *next;
 #ifdef RUBY_VM
   rb_thread_t *thread;
-  stackinfo_t *next;
 #endif
 };
 
@@ -404,8 +404,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #endif
   };
 
-  stackinfo_t *current_stack;
-  current_stack = &rblineprof.stackinfo;
+  stackinfo_t *current_stack = &rblineprof.stackinfo;
 #ifdef RUBY_VM
   while (current_stack->thread != NULL && current_stack->thread != th) {
     if (current_stack->next == NULL) {
@@ -643,6 +642,7 @@ lineprof(VALUE self, VALUE filename)
   rblineprof.cache.srcfile = NULL;
   rblineprof.stackinfo.stack_depth = 0;
   cleanup_stack(rblineprof.stackinfo.next);
+  rblineprof.stackinfo.next = NULL;
 
   rblineprof.enabled = true;
 #ifndef RUBY_VM
