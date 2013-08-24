@@ -31,6 +31,10 @@
            | end
 ```
 
+### Rails integration
+
+* [peek-rblineprof](https://github.com/peek/peek-rblineprof#peekrblineprof)
+
 ## Other profilers
 
 * [PLine](https://github.com/soba1104/PLine) line-profiler for ruby 1.9
