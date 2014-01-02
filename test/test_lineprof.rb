@@ -9,7 +9,7 @@ class LineProfTest < Test::Unit::TestCase
     end
 
     line = profile[__FILE__][__LINE__-3]
-    assert_in_delta 1000, line[0], 300
+    assert_in_delta 1000, line[0], 600
     assert_equal 1, line[2]
   end
 
@@ -19,7 +19,7 @@ class LineProfTest < Test::Unit::TestCase
     end
 
     line = profile[__FILE__][__LINE__-3]
-    assert_operator line[1], :>, 1000
+    assert_operator line[1], :>=, 800
   end
 
   def test_objects

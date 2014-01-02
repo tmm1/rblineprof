@@ -2,7 +2,12 @@ require 'mkmf'
 
 have_func('rb_os_allocated_objects')
 
-if RUBY_VERSION >= "1.9"
+if RUBY_VERSION >= "2.1"
+  have_func('rb_gc_stat')
+  have_func('rb_profile_frames')
+  have_func('rb_tracepoint_new')
+  create_makefile 'rblineprof'
+elsif RUBY_VERSION >= "1.9"
   require "debugger/ruby_core_source"
 
   hdrs = proc {
