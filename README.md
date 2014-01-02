@@ -1,9 +1,8 @@
 # rblineprof
 
 ```
-% ruby -C ext extconf.rb
-% make -C ext
-% ruby test.rb 
+% rake compile
+% ruby test.rb
            | $:.unshift 'ext'
            | require 'rblineprof'
            | 
@@ -43,6 +42,7 @@
 * [ruby-prof](https://github.com/rdp/ruby-prof)
 * [perftools.rb](https://github.com/tmm1/perftools.rb)
 * [zenprofile](https://github.com/seattlerb/zenprofile)
+* [stackprof](https://github.com/tmm1/stackprof)
 
 ## License
 
