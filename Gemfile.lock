@@ -1,8 +1,8 @@
 PATH
   remote: .
   specs:
-    rblineprof (0.3.2)
-      debugger-ruby_core_source (~> 1.2)
+    rblineprof (0.3.3)
+      debugger-ruby_core_source (~> 1.3)
 
 GEM
   remote: https://rubygems.org/
