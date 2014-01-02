@@ -1,4 +1,4 @@
-$:.unshift 'ext'
+$:.unshift 'lib'
 require 'rblineprof'
 
 class Obj
@@ -108,16 +108,20 @@ profile = lineprof(/./) do
   ('a'..'z').to_a
 end
 
+allocation_mode = false
+
 File.readlines(file).each_with_index do |line, num|
   wall, cpu, calls, allocations = profile[file][num+1]
 
-  if allocations > 0
-    printf "% 10d objs | %s", allocations, line
-  else
-    printf "                | %s", line
-  end
+  if allocation_mode
+    if allocations > 0
+      printf "% 10d objs | %s", allocations, line
+    else
+      printf "                | %s", line
+    end
 
-  next
+    next
+  end
 
   if calls && calls > 0
     printf "% 8.1fms + % 8.1fms (% 5d) | %s", cpu/1000.0, (wall-cpu)/1000.0, calls, line
