@@ -6,10 +6,11 @@
 
 #if defined(RUBY_VM)
   #include <ruby/re.h>
-  #include <ruby/debug.h>
   #include <ruby/intern.h>
 
-  #if !defined(HAVE_RB_PROFILE_FRAMES)
+  #if defined(HAVE_RB_PROFILE_FRAMES)
+    #include <ruby/debug.h>
+  #else
     #include <vm_core.h>
     #include <iseq.h>
 
