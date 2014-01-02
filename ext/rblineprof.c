@@ -4,15 +4,19 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
-#ifdef RUBY_VM
+#if defined(RUBY_VM)
   #include <ruby/re.h>
+  #include <ruby/debug.h>
   #include <ruby/intern.h>
-  #include <vm_core.h>
-  #include <iseq.h>
 
-  // There's a compile error on 1.9.3. So:
-  #ifdef RTYPEDDATA_DATA
-  #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+  #if !defined(HAVE_RB_PROFILE_FRAMES)
+    #include <vm_core.h>
+    #include <iseq.h>
+
+    // There's a compile error on 1.9.3. So:
+    #ifdef RTYPEDDATA_DATA
+    #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+    #endif
   #endif
 #else
   #include <st.h>
@@ -28,6 +32,7 @@ size_t rb_os_allocated_objects(void);
 #endif
 
 static VALUE gc_hook;
+static VALUE sym_total_allocated_object;
 
 /*
  * Time in microseconds
@@ -40,7 +45,7 @@ typedef uint64_t prof_time_t;
 typedef struct snapshot {
   prof_time_t wall_time;
   prof_time_t cpu_time;
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
   size_t allocated_objects;
 #endif
 } snapshot_t;
@@ -78,7 +83,9 @@ typedef struct sourcefile {
 typedef struct stackframe {
   // data emitted from Ruby to our profiler hook
   rb_event_flag_t event;
-#ifdef RUBY_VM
+#if defined(HAVE_RB_PROFILE_FRAMES)
+  VALUE thread;
+#elif defined(RUBY_VM)
   rb_thread_t *thread;
 #else
   NODE *node;
@@ -162,7 +169,7 @@ snapshot_diff(snapshot_t *t1, snapshot_t *t2)
   snapshot_t diff = {
     .wall_time         = t1->wall_time - t2->wall_time,
     .cpu_time          = t1->cpu_time  - t2->cpu_time,
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
     .allocated_objects = t1->allocated_objects - t2->allocated_objects
 #endif
   };
@@ -175,7 +182,7 @@ snapshot_increment(snapshot_t *s, snapshot_t *inc)
 {
   s->wall_time         += inc->wall_time;
   s->cpu_time          += inc->cpu_time;
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
   s->allocated_objects += inc->allocated_objects;
 #endif
 }
@@ -277,7 +284,7 @@ sourcefile_lookup(char *filename)
   return srcfile;
 }
 
-#ifdef RUBY_VM
+#if defined(RUBY_VM) && !defined(HAVE_RB_PROFILE_FRAMES)
 /* Find the source of the current method call. This is based on rb_f_caller
  * in vm_eval.c, and replicates the behavior of `caller.first` from ruby.
  *
@@ -343,7 +350,17 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    * we use ruby_current_node here to get the caller's file/line info,
    * (as opposed to node, which points to the callee method being invoked)
    */
-#ifndef RUBY_VM
+#if defined(HAVE_RB_PROFILE_FRAMES)
+  int l;
+  VALUE iseq, path;
+  rb_profile_frames(0, 1, &iseq, &l);
+
+  /* TODO: use fstring VALUE directly */
+  path = rb_profile_frame_absolute_path(iseq);
+  if (!RTEST(path)) path = rb_profile_frame_path(iseq);
+  file = RSTRING_PTR(path);
+  line = l;
+#elif !defined(RUBY_VM)
   NODE *caller_node = ruby_frame->node;
   if (!caller_node) return;
 
@@ -390,8 +407,10 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   snapshot_t now = {
     .wall_time         = walltime_usec(),
     .cpu_time          = cputime_usec(),
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS)
     .allocated_objects = rb_os_allocated_objects()
+#elif defined(HAVE_RB_GC_STAT)
+    .allocated_objects = rb_gc_stat(sym_total_allocated_object)
 #endif
   };
 
@@ -415,7 +434,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         frame->line = line;
         frame->start = now;
         frame->srcfile = srcfile;
-#ifdef RUBY_VM
+#if defined(HAVE_RB_PROFILE_FRAMES)
+        frame->thread = rb_thread_current();
+#elif defined(RUBY_VM)
         frame->thread = th;
 #else
         frame->node = node;
@@ -462,7 +483,9 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
         if (rblineprof.stack_depth > 0)
           rblineprof.stack_depth--;
       } while (frame &&
-#ifdef RUBY_VM
+#if defined(HAVE_RB_PROFILE_FRAMES)
+               frame->thread != rb_thread_current() &&
+#elif defined(RUBY_VM)
                frame->thread != th &&
 #endif
                /* Break when we find a matching CALL/C_CALL.
@@ -531,7 +554,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
   long i;
 
   rb_ary_store(ary, 0, rb_ary_new3(
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
     7,
 #else
     6,
@@ -542,14 +565,14 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
     ULL2NUM(srcfile->total.cpu_time),
     ULL2NUM(srcfile->child.cpu_time),
     ULL2NUM(srcfile->exclusive.cpu_time)
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
     , ULL2NUM(srcfile->total.allocated_objects)
 #endif
   ));
 
   for (i=1; i<srcfile->nlines; i++)
     rb_ary_store(ary, i, rb_ary_new3(
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
       4,
 #else
       3,
@@ -557,7 +580,7 @@ summarize_files(st_data_t key, st_data_t record, st_data_t arg)
       ULL2NUM(srcfile->lines[i].total.wall_time),
       ULL2NUM(srcfile->lines[i].total.cpu_time),
       ULL2NUM(srcfile->lines[i].calls)
-#ifdef HAVE_RB_OS_ALLOCATED_OBJECTS
+#if defined(HAVE_RB_OS_ALLOCATED_OBJECTS) || defined(HAVE_RB_GC_STAT)
       , ULL2NUM(srcfile->lines[i].total.allocated_objects)
 #endif
     ));
@@ -621,7 +644,6 @@ lineprof(VALUE self, VALUE filename)
   rb_ensure(rb_yield, Qnil, lineprof_ensure, self);
 
   VALUE ret = rb_hash_new();
-  VALUE ary = Qnil;
 
   if (rblineprof.source_filename) {
     summarize_files(Qnil, (st_data_t)&rblineprof.file, ret);
@@ -642,6 +664,7 @@ rblineprof_gc_mark()
 void
 Init_rblineprof()
 {
+  sym_total_allocated_object = ID2SYM(rb_intern("total_allocated_object"));
   gc_hook = Data_Wrap_Struct(rb_cObject, rblineprof_gc_mark, NULL, NULL);
   rb_global_variable(&gc_hook);
 
