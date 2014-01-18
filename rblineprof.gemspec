@@ -15,4 +15,5 @@ Gem::Specification.new do |s|
   s.license = 'MIT'
 
   s.add_dependency 'debugger-ruby_core_source', '~> 1.3'
+  s.add_development_dependency 'rake-compiler'
 end
