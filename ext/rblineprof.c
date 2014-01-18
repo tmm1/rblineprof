@@ -352,9 +352,16 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
    * (as opposed to node, which points to the callee method being invoked)
    */
 #if defined(HAVE_RB_PROFILE_FRAMES)
-  int l;
-  VALUE iseq, path;
-  rb_profile_frames(0, 1, &iseq, &l);
+  VALUE path, iseq;
+  VALUE iseqs[2];
+  int lines[2];
+  int i = 0, l, n = rb_profile_frames(0, 2, iseqs, lines);
+
+  if (mid == 0 && n == 2) /* skip empty frame on method definition line */
+    i = 1;
+
+  l = lines[i];
+  iseq = iseqs[i];
 
   /* TODO: use fstring VALUE directly */
   path = rb_profile_frame_absolute_path(iseq);

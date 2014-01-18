@@ -30,4 +30,18 @@ class LineProfTest < Test::Unit::TestCase
     line = profile[__FILE__][__LINE__-3]
     assert_equal 100, line[3]
   end
+
+  def test_method
+    profile = lineprof(/./) do
+      100.times{ helper_method }
+    end
+
+    m = method(:helper_method)
+    line = profile[__FILE__][m.source_location.last]
+    assert_equal 0, line[0]
+  end
+
+  def helper_method
+    sleep 0.001
+  end
 end
