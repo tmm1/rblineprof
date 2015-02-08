@@ -1,4 +1,5 @@
 #include <ruby.h>
+#include <ruby/version.h>
 #include <stdbool.h>
 #include <time.h>
 #include <sys/time.h>
@@ -33,7 +34,7 @@ size_t rb_os_allocated_objects(void);
 #endif
 
 static VALUE gc_hook;
-static VALUE sym_total_allocated_object;
+static VALUE sym_total_allocated_objects;
 
 /*
  * Time in microseconds
@@ -418,7 +419,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
 #if defined(HAVE_RB_OS_ALLOCATED_OBJECTS)
     .allocated_objects = rb_os_allocated_objects()
 #elif defined(HAVE_RB_GC_STAT)
-    .allocated_objects = rb_gc_stat(sym_total_allocated_object)
+    .allocated_objects = rb_gc_stat(sym_total_allocated_objects)
 #endif
   };
 
@@ -672,7 +673,11 @@ rblineprof_gc_mark()
 void
 Init_rblineprof()
 {
-  sym_total_allocated_object = ID2SYM(rb_intern("total_allocated_object"));
+#if RUBY_API_VERSION_MAJOR == 2 && RUBY_API_VERSION_MINOR < 2
+  sym_total_allocated_objects = ID2SYM(rb_intern("total_allocated_object"));
+#else
+  sym_total_allocated_objects = ID2SYM(rb_intern("total_allocated_objects"));
+#endif
   gc_hook = Data_Wrap_Struct(rb_cObject, rblineprof_gc_mark, NULL, NULL);
   rb_global_variable(&gc_hook);
 
