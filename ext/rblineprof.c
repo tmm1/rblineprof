@@ -358,6 +358,7 @@ profiler_hook(rb_event_flag_t event, NODE *node, VALUE self, ID mid, VALUE klass
   int lines[2];
   int i = 0, l, n = rb_profile_frames(0, 2, iseqs, lines);
 
+  if (n == 0) return;
   if (mid == 0 && n == 2) /* skip empty frame on method definition line */
     i = 1;
 
