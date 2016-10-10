@@ -365,6 +365,13 @@ lineprof_ensure(VALUE self)
   return self;
 }
 
+static VALUE
+lineprof_rescue(VALUE args, VALUE exception_object)
+{
+  rb_raise(rb_eRuntimeError, "Uncaught exception (%s) in profiled code.", rb_obj_classname(exception_object));
+  return Qnil;
+}
+
 VALUE
 lineprof(VALUE self, VALUE filename)
 {
@@ -426,6 +433,12 @@ lineprof(VALUE self, VALUE filename)
   return ret;
 }
 
+VALUE
+lineprof_wrapper(VALUE self, VALUE filename)
+{
+  rb_rescue(lineprof, filename, lineprof_rescue, Qnil);
+}
+
 static void
 rblineprof_gc_mark()
 {
@@ -440,7 +453,7 @@ Init_rblineprof()
   rb_global_variable(&gc_hook);
 
   rblineprof.files = st_init_strtable();
-  rb_define_global_function("lineprof", lineprof, 1);
+  rb_define_global_function("lineprof", lineprof_wrapper, 1);
 }
 
 /* vim: set ts=2 sw=2 expandtab: */
