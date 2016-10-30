@@ -1,34 +1,88 @@
 # rblineprof
 
+## Installation
+
+`gem install rblineprof`
+
+Or in your Gemfile:
+
+`gem 'rblineprof'`
+
+## Usage
+
 ```
-% ruby -C ext extconf.rb
-% make -C ext
-% ruby test.rb 
-           | $:.unshift 'ext'
-           | require 'rblineprof'
-           | 
-           | profile = lineprof(/./) do
-     1.2ms |    sleep 0.001
-           | 
-     0.1ms |    100.times do
-           | 
-   119.6ms |      sleep 0.001
-     0.7ms |      1*2*3
-     0.2ms |      4*5*6
-     0.4ms |      7*8*9*10*11*12*13*14*15
-     0.2ms |      2**32
-     1.4ms |      2**128
-           | 
-           |   end
-           | end
-           | 
-           | File.readlines(__FILE__).each_with_index do |line, num|
-           |   if (sample = profile[__FILE__][num+1]) > 0
-           |     printf "% 8.1fms |  %s", sample/1000.0, line
-           |   else
-           |     printf "           | %s", line
-           |   end
-           | end
+require 'rblineprof'
+
+profile = lineprof(/./) do
+  sleep 0.001
+
+  100.times do
+    sleep 0.001
+
+    1*2*3
+    4*5*6
+    7*8*9*10*11*12*13*14*15
+    2**32
+    2**128
+  end
+end
+
+file = profile.keys.first
+
+File.readlines(file).each_with_index do |line, num|
+  wall, cpu, calls, allocations = profile[file][num + 1]
+
+  if wall > 0 || cpu > 0 || calls > 0
+    printf(
+      "% 5.1fms + % 6.1fms (% 4d) | %s",
+      cpu / 1000.0,
+      (wall - cpu) / 1000.0,
+      calls,
+      line
+    )
+  else
+    printf "                          | %s", line
+  end
+end
+```
+
+Will give you:
+
+```
+                          | require 'rblineprof'
+                          | 
+                          | profile = lineprof(/./) do
+  0.1ms +    1.4ms (   1) |   sleep 0.001
+                          | 
+  2.7ms +  132.2ms (   1) |   100.times do
+  1.3ms +  131.7ms ( 100) |     sleep 0.001
+                          | 
+                          |     1*2*3
+                          |     4*5*6
+                          |     7*8*9*10*11*12*13*14*15
+  0.1ms +    0.1ms ( 100) |     2**32
+  0.6ms +    0.1ms ( 100) |     2**128
+                          |   end
+                          | end
+                          | 
+                          | file = profile.keys.first
+                          | 
+                          | File.readlines(file).each_with_index do |line, num|
+                          |   wall, cpu, calls, allocations = profile[file][num + 1]
+                          | 
+                          |   if wall > 0 || cpu > 0 || calls > 0
+                          |     printf(
+                          |       "% 5.1fms + % 6.1fms (% 4d) | %s",
+                          |       cpu / 1000.0,
+                          |       (wall - cpu) / 1000.0,
+                          |       calls,
+                          |       line
+                          |     )
+                          |   else
+                          |     printf "                          | %s", line
+                          |   end
+                          | end
+
 ```
 
 ### Rails integration
