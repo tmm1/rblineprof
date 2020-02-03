@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rblineprof (0.3.7)
+    rblineprof (0.3.8)
       debugger-ruby_core_source (~> 1.3)
 
 GEM
@@ -20,4 +20,4 @@ DEPENDENCIES
   rblineprof!
 
 BUNDLED WITH
-   2.0.2
+   2.1.0.pre.1
